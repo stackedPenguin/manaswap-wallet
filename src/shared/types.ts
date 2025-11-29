@@ -1,0 +1,165 @@
+import type { NetworkClusterId } from './networks';
+
+export interface WalletSettings {
+  autoDetectNetworks: boolean;
+  selectedNetwork: NetworkClusterId;
+  siteOverrides: Record<string, NetworkClusterId>;
+  customNetworks: import('./networks').NetworkConfig[];
+}
+
+export interface SiteDetectionPayload {
+  origin: string;
+  hostname: string;
+  detectedNetwork: NetworkClusterId;
+  confidence: number; // 0-1 for future heuristics
+}
+
+// --- Vault & Keyring Types ---
+
+export interface EncryptedVault {
+  ciphertext: string;
+  iv: string;
+  salt: string;
+}
+
+export type KeySourceType = 'mnemonic' | 'privateKey' | 'ledger';
+
+export interface KeySource {
+  id: string;
+  type: KeySourceType;
+  value: string; // Mnemonic or Secret Key (encrypted in vault)
+  label?: string;
+  accounts: AccountInfo[]; // Active accounts derived from this source
+}
+
+export interface KeyringData {
+  sources: KeySource[];
+  // Deprecated fields for migration (optional)
+  mnemonic?: string;
+  importedKeys?: string[];
+  nextIndex?: number;
+  ledgerAccounts?: AccountInfo[];
+}
+
+export interface VaultState {
+  isInitialized: boolean;
+  isLocked: boolean;
+}
+
+export interface AccountInfo {
+  address: string;
+  index: number; // For derived accounts
+  label?: string;
+  type: 'derived' | 'imported' | 'ledger';
+  derivationPath?: string; // For Ledger
+  sourceId?: string; // ID of the KeySource this account belongs to
+}
+
+export interface TokenBalance {
+  mint: string;
+  amount: string;
+  decimals: number;
+  symbol?: string;
+  name?: string;
+  logoURI?: string;
+  usdValue?: number;
+}
+
+export interface AccountBalance {
+  solBalance: number;
+  tokens: TokenBalance[];
+  lastUpdated: number;
+}
+
+export interface TransactionActivity {
+  id: string;
+  type: 'send' | 'receive' | 'token-transfer' | 'dapp-interaction';
+  signature?: string;
+  from: string;
+  to?: string;
+  amount?: number;
+  tokenMint?: string;
+  networkId: NetworkClusterId;
+  timestamp: number;
+  status: 'pending' | 'confirmed' | 'failed';
+}
+
+export interface DAppPermission {
+  origin: string;
+  hostname: string;
+  publicKey: string;
+  networkId: NetworkClusterId;
+  grantedAt: number;
+  lastUsed: number;
+}
+
+export interface PendingRequest {
+  id: string;
+  type: 'connect' | 'sign-transaction' | 'sign-all-transactions' | 'sign-message';
+  origin: string;
+  hostname: string;
+  payload?: unknown;
+  timestamp: number;
+}
+
+// Re-export NetworkHealth for convenience
+export type { NetworkHealth } from './networks';
+
+// --- Notifications ---
+export interface Notification {
+  id: string;
+  type: 'network-switch' | 'detection' | 'info' | 'warning';
+  message: string;
+  networkId?: NetworkClusterId;
+  actionLabel?: string;
+  onAction?: () => void;
+  duration?: number;
+}
+
+// --- Messages ---
+
+export type ManaswapMessage =
+  | { type: 'manaswap:getSettings' }
+  | { type: 'manaswap:setSettings'; payload: WalletSettings }
+  | { type: 'manaswap:detectionEvent'; payload: SiteDetectionPayload }
+  // Vault Messages
+  | { type: 'manaswap:getVaultState' }
+  | { type: 'manaswap:createVault'; payload: { password: string; mnemonic?: string } } // mnemonic optional (generate new if missing)
+  | { type: 'manaswap:unlockVault'; payload: { password: string } }
+  | { type: 'manaswap:lockVault' }
+  | { type: 'manaswap:revealMnemonic'; payload: { password: string } }
+  | { type: 'manaswap:revealPrivateKey'; payload: { password: string; accountAddress: string } }
+  | { type: 'manaswap:getAccounts' }
+  | { type: 'manaswap:addAccount'; payload: { label?: string } }
+  | { type: 'manaswap:manageAccount'; payload: { action: 'showMnemonic' | 'showPrivateKey'; accountIndex: number; password?: string } }
+  | { type: 'manaswap:restoreVault'; payload: { mnemonic: string; password: string } }
+  | { type: 'manaswap:discoverAccounts'; payload: { networkId: NetworkClusterId } }
+  | { type: 'manaswap:addKeySource'; payload: { type: KeySourceType; value?: string; label?: string } }
+  | { type: 'manaswap:importAccount'; payload: { privateKey: string; label?: string; password: string } }
+  | { type: 'manaswap:setAccountLabel'; payload: { address: string; label: string } }
+  | { type: 'manaswap:getLedgerAccounts'; payload: { pathStart?: number; limit?: number } }
+  // Network Health Messages
+  | { type: 'manaswap:checkNetworkHealth'; payload: { networkId: NetworkClusterId } }
+  | { type: 'manaswap:checkAllNetworkHealth' }
+  | { type: 'manaswap:getNetworkHealth' }
+  // Notification Messages
+  | { type: 'manaswap:getPendingNotifications' }
+  | { type: 'manaswap:clearNotification'; payload: { notificationId: string } }
+  | { type: 'manaswap:optOutDetection'; payload: { hostname: string } }
+  // Balance Messages
+  | { type: 'manaswap:getBalance'; payload: { address: string; networkId: NetworkClusterId } }
+  | { type: 'manaswap:refreshBalance'; payload: { address: string; networkId: NetworkClusterId } }
+  // Transaction Messages
+  | { type: 'manaswap:sendTransaction'; payload: { recipient: string; amount: number; networkId: NetworkClusterId } }
+  // dApp Messages
+  | { type: 'manaswap:dappConnect'; payload: { origin: string; hostname: string } }
+  | { type: 'manaswap:dappDisconnect'; payload: { origin: string } }
+  | { type: 'manaswap:dappSignTransaction'; payload: { origin: string; transaction: unknown } }
+  | { type: 'manaswap:dappSignAllTransactions'; payload: { origin: string; transactions: unknown[] } }
+  | { type: 'manaswap:dappSignMessage'; payload: { origin: string; message: Uint8Array } }
+  | { type: 'manaswap:getPendingRequests' }
+  | { type: 'manaswap:approveRequest'; payload: { requestId: string } }
+  | { type: 'manaswap:rejectRequest'; payload: { requestId: string } }
+  | { type: 'manaswap:getPermissions' }
+  | { type: 'manaswap:revokePermission'; payload: { origin: string } }
+  | { type: 'manaswap:getTokenPrices'; payload: { mints: string[] } };

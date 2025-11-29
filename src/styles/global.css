@@ -1,0 +1,29 @@
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  color: #f8fafc;
+  background-color: #030712;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #030712;
+}
+
+button {
+  cursor: pointer;
+}
+
+input,
+select,
+button,
+textarea {
+  font: inherit;
+}

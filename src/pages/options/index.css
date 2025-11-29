@@ -1,0 +1,69 @@
+.options-shell {
+  min-height: 100vh;
+  padding: 32px;
+  background: #030712;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+section {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+section h2 {
+  margin-top: 0;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.form-row input,
+.form-row select {
+  flex: 1;
+  min-width: 220px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(2, 6, 23, 0.7);
+  color: #e2e8f0;
+}
+
+button.primary {
+  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.overrides-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.overrides-table th,
+.overrides-table td {
+  padding: 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.overrides-table button {
+  border: none;
+  background: transparent;
+  color: #f87171;
+  font-weight: 600;
+}
