@@ -3,6 +3,7 @@ import { defaultSettings, readSettings, writeSettings } from '../shared/settings
 import type { DAppPermission, ManaswapMessage, Notification, PendingRequest, SiteDetectionPayload, WalletSettings } from '../shared/types';
 import { fetchAccountBalance } from '../shared/balances';
 import { fetchTokenPrices } from '../shared/prices';
+import { fetchTransactionHistory } from '../shared/history';
 import { sendSol } from '../shared/transactions';
 import {
   createVault,
@@ -517,6 +518,19 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           // Convert Map to Object for serialization
           sendResponse({ success: true, prices: Object.fromEntries(prices) });
         } catch (e: any) {
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:getTransactionHistory': {
+        try {
+          const { address, networkId, limit } = message.payload;
+          const config = getNetworkConfig(networkId);
+          const connection = new Connection(config.rpcUrl, 'confirmed');
+          const history = await fetchTransactionHistory(connection, address, networkId, limit);
+          sendResponse({ success: true, history });
+        } catch (e: any) {
+          console.error('History fetch failed:', e);
           sendResponse({ success: false, error: e.message });
         }
         break;

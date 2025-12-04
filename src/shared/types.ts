@@ -162,4 +162,6 @@ export type ManaswapMessage =
   | { type: 'manaswap:rejectRequest'; payload: { requestId: string } }
   | { type: 'manaswap:getPermissions' }
   | { type: 'manaswap:revokePermission'; payload: { origin: string } }
-  | { type: 'manaswap:getTokenPrices'; payload: { mints: string[] } };
+  | { type: 'manaswap:getTokenPrices'; payload: { mints: string[] } }
+  | { type: 'manaswap:getTransactionHistory'; payload: { address: string; networkId: NetworkClusterId; limit?: number } }
+  | { type: 'manaswap:executeSwap'; payload: { swapTransactionBase64: string } };

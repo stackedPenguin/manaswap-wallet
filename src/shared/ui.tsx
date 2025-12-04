@@ -115,5 +115,7 @@ export const Icons = {
   Settings: (props: any) => <Settings size={14} {...props} />,
   Plus: (props: any) => <Plus size={14} {...props} />,
   Hardware: (props: any) => <HardDrive size={16} {...props} />,
+  X: (props: any) => <X size={18} {...props} />,
+  ArrowDown: (props: any) => <ArrowDown size={18} {...props} />,
 };
 
