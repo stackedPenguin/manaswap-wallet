@@ -1,3 +1,6 @@
+import { registerWallet } from './register';
+import { ManaswapWalletImpl } from './walletStandard';
+
 type ManaswapEventPayload = {
   provider: string;
   version: string;
@@ -6,6 +9,8 @@ type ManaswapEventPayload = {
 class ManaswapProvider extends EventTarget {
   public isConnected = false;
   public publicKey: string | null = null;
+  public isManaswap = true;
+  public isPhantom = false; // Compatibility check - we're not Phantom
 
   private requestId = 0;
   private pendingRequests = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
@@ -95,12 +100,51 @@ class ManaswapProvider extends EventTarget {
     }
   }
 
+  async signAndSendTransaction<T>(transaction: T, options?: { skipPreflight?: boolean }): Promise<{ signature: string }> {
+    try {
+      const result = await this.sendRequest('sign-and-send-transaction', { transaction, options }) as { signature: string };
+      return result;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Alias for signAndSendTransaction - some dApps use this
+  async send<T>(transaction: T, _signers?: unknown[], options?: { skipPreflight?: boolean }): Promise<string> {
+    const result = await this.signAndSendTransaction(transaction, options);
+    return result.signature;
+  }
+
   async signMessage(message: Uint8Array): Promise<{ signature: Uint8Array }> {
     try {
       const result = await this.sendRequest('sign-message', Array.from(message)) as { signature: number[] };
       return {
         signature: new Uint8Array(result.signature),
       };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getNetwork(): Promise<{ networkId: string; name: string; rpcUrl: string }> {
+    try {
+      const result = await this.sendRequest('get-network') as { success: boolean; networkId: string; name: string; rpcUrl: string };
+      if (!result.success) {
+        throw new Error('Failed to get network');
+      }
+      return { networkId: result.networkId, name: result.name, rpcUrl: result.rpcUrl };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async switchChain(networkId: string): Promise<{ success: boolean }> {
+    try {
+      const result = await this.sendRequest('switch-chain', { networkId }) as { success: boolean; error?: string };
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to switch chain');
+      }
+      return { success: true };
     } catch (error) {
       throw error;
     }
@@ -124,12 +168,20 @@ declare global {
   }
   const provider = new ManaswapProvider();
   window.manaswap = provider;
-  
+
   // Also expose as window.solana for compatibility
   if (!window.solana) {
     window.solana = provider;
   }
-  
+
+  // Register Wallet Standard
+  try {
+    registerWallet(new ManaswapWalletImpl(provider));
+  } catch (error) {
+    console.error('[Manaswap] Failed to register wallet standard', error);
+  }
+
   const detail: ManaswapEventPayload = { provider: 'manaswap', version: '0.1.0' };
   window.dispatchEvent(new CustomEvent('manaswap#initialized', { detail }));
+  console.log('[Manaswap] Wallet Standard Injected & Registered');
 })();

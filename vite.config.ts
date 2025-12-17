@@ -20,5 +20,14 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: 'src/pages/popup/index.html',
+        inject: 'src/provider/inject.ts',
+      },
+      output: {
+        entryFileNames: 'assets/[name].js',
+      },
+    },
   },
 });

@@ -4,10 +4,12 @@ import { DEFAULT_NETWORK_ID } from './networks';
 const STORAGE_KEY = 'manaswap:settings';
 
 export const defaultSettings: WalletSettings = {
-  autoDetectNetworks: true,
+  autoDetectNetworks: false, // Disabled by default - don't auto-switch unless explicitly requested
   selectedNetwork: DEFAULT_NETWORK_ID,
+  selectedAccountAddress: undefined,
   siteOverrides: {},
   customNetworks: [],
+  autoLockMinutes: 10, // Default: lock after 10 minutes of inactivity
 };
 
 export async function readSettings(): Promise<WalletSettings> {

@@ -4,8 +4,10 @@ export type NetworkClusterId =
   | 'solana-mainnet'
   | 'solana-testnet'
   | 'solana-devnet'
+  | 'solana-localnet'
   | 'x1-mainnet'
   | 'x1-testnet'
+  | 'x1-localnet'
   | string; // Allow custom network IDs
 
 export interface NetworkConfig {
@@ -14,7 +16,7 @@ export interface NetworkConfig {
   rpcUrl: string;
   explorerUrl: string;
   kind: 'solana' | 'x1';
-  environment: 'mainnet' | 'testnet' | 'devnet' | 'custom';
+  environment: 'mainnet' | 'testnet' | 'devnet' | 'localnet' | 'custom';
 }
 
 export type NetworkHealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown';
@@ -67,6 +69,22 @@ export const NETWORKS: NetworkConfig[] = [
     explorerUrl: 'https://explorer.x1.xyz?cluster=testnet',
     kind: 'x1',
     environment: 'testnet',
+  },
+  {
+    id: 'solana-localnet',
+    label: 'Solana Localnet',
+    rpcUrl: 'http://127.0.0.1:8899',
+    explorerUrl: 'https://explorer.solana.com?cluster=custom&customUrl=http://127.0.0.1:8899',
+    kind: 'solana',
+    environment: 'localnet',
+  },
+  {
+    id: 'x1-localnet',
+    label: 'X1 Localnet',
+    rpcUrl: 'http://127.0.0.1:8901',
+    explorerUrl: 'https://explorer.x1.xyz?cluster=custom&customUrl=http://127.0.0.1:8901',
+    kind: 'x1',
+    environment: 'localnet',
   },
 ];
 

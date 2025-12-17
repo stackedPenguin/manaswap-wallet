@@ -1,117 +1,115 @@
-import { VersionedTransaction } from '@solana/web3.js';
-
-// Jupiter API Types
 export interface QuoteResponse {
     inputMint: string;
     inAmount: string;
     outputMint: string;
     outAmount: string;
     otherAmountThreshold: string;
-    swapMode: 'ExactIn' | 'ExactOut';
+    swapMode: string;
     slippageBps: number;
-    platformFee?: {
-        amount: string;
-        feeBps: number;
-    };
     priceImpactPct: string;
-    routePlan: {
-        swapInfo: {
-            ammKey: string;
-            label?: string;
-            inputMint: string;
-            outputMint: string;
-            inAmount: string;
-            outAmount: string;
-            feeAmount: string;
-            feeMint: string;
-        };
-        percent: number;
-    }[];
-    contextSlot?: number;
-    timeTaken?: number;
+    routePlan: any[];
+    transaction?: string; // Ultra API returns transaction directly in quote/order response
+    requestId?: string;
 }
 
-export interface SwapResponse {
-    swapTransaction: string;
-    lastValidBlockHeight: number;
-    prioritizationFeeLamports?: number;
-}
+const ULTRA_API_BASE = 'https://api.jup.ag/ultra/v1';
 
-const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
+// Helper to get API key from env
+const getApiKey = () => import.meta.env.VITE_JUPITER_ULTRA_API_KEY;
 
-/**
- * Get a swap quote from Jupiter
- * @param inputMint Mint address of input token
- * @param outputMint Mint address of output token
- * @param amount Amount in atomic units (lamports/smallest unit)
- * @param slippageBps Slippage in basis points (e.g. 50 = 0.5%). User requested 0.001% -> 0.1 bps? 
- *                    Jupiter might require integer. 0.001% is extremely low and might fail often.
- *                    1 bps = 0.01%. 0.1 bps = 0.001%.
- *                    Let's try to pass 'auto' or a small number.
- */
 export async function getSwapQuote(
     inputMint: string,
     outputMint: string,
     amount: number,
-    slippageBps: number = 50 // Default 0.5%
+    slippageBps: number = 50
 ): Promise<QuoteResponse> {
-    // Jupiter v6 supports 'auto' slippage or explicit bps.
-    // API expects amount as string.
+    const apiKey = getApiKey();
+    if (!apiKey) {
+        throw new Error('Jupiter Ultra API Key is missing in .env');
+    }
 
+    // Ultra API /order endpoint
+    // GET https://api.jup.ag/ultra/v1/order?inputMint=...&outputMint=...&amount=...&slippageBps=...
     const params = new URLSearchParams({
         inputMint,
         outputMint,
         amount: amount.toString(),
         slippageBps: slippageBps.toString(),
-        // 'onlyDirectRoutes': 'false', // Default
-        // 'asLegacyTransaction': 'false', // We want versioned tx
+        // Optional: taker address could be passed if we want a transaction immediately, 
+        // but for just a quote display we might not need it?
+        // Actually, Ultra API docs say /order returns "Unsigned base-64 encoded transaction".
+        // If we want the transaction, we should probably pass the taker if we have it.
+        // But getSwapQuote is usually just for display.
+        // Let's check the docs again. "Request for a base64-encoded unsigned swap transaction".
+        // So /order IS the quote AND the transaction builder.
+        // For now, let's just fetch the quote info.
     });
 
-    const response = await fetch(`${JUPITER_QUOTE_API}/quote?${params.toString()}`);
+    const url = `${ULTRA_API_BASE}/order?${params.toString()}`;
+
+    console.log(`[Swap] Fetching Ultra quote: ${url}`);
+
+    const response = await fetch(url, {
+        headers: {
+            'x-api-key': apiKey
+        }
+    });
 
     if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to get quote');
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`Jupiter Ultra API error: ${response.status} ${err.error || ''}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    return data;
 }
 
-/**
- * Get the serialized swap transaction from Jupiter
- * @param quoteResponse The quote object received from getSwapQuote
- * @param userPublicKey User's public key as string
- */
 export async function getSwapTransaction(
     quoteResponse: QuoteResponse,
     userPublicKey: string
-): Promise<SwapResponse> {
-    const response = await fetch(`${JUPITER_QUOTE_API}/swap`, {
-        method: 'POST',
+): Promise<{ swapTransaction: string }> {
+    // With Ultra API, the /order endpoint (which we mapped to getSwapQuote) 
+    // MIGHT have already returned the transaction if we passed the taker.
+    // If we didn't pass the taker to getSwapQuote, we need to call it again WITH the taker.
+
+    // Let's check if we have the transaction already
+    if (quoteResponse.transaction) {
+        return { swapTransaction: quoteResponse.transaction };
+    }
+
+    // If not, we need to call /order again with the taker
+    const apiKey = getApiKey();
+    const params = new URLSearchParams({
+        inputMint: quoteResponse.inputMint,
+        outputMint: quoteResponse.outputMint,
+        amount: quoteResponse.inAmount,
+        slippageBps: quoteResponse.slippageBps.toString(),
+        taker: userPublicKey
+    });
+
+    const url = `${ULTRA_API_BASE}/order?${params.toString()}`;
+    console.log(`[Swap] Fetching Ultra transaction: ${url}`);
+
+    const response = await fetch(url, {
         headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            quoteResponse,
-            userPublicKey,
-            wrapAndUnwrapSol: true,
-            // prioritizationFeeLamports: 'auto' // Optional: auto dynamic fee
-        })
+            'x-api-key': apiKey
+        }
     });
 
     if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to get swap transaction');
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`Jupiter Ultra API error: ${response.status} ${err.error || ''}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+
+    if (!data.transaction) {
+        throw new Error('No transaction returned from Jupiter Ultra API');
+    }
+
+    return { swapTransaction: data.transaction };
 }
 
-/**
- * Deserialize and sign the transaction (helper for UI)
- * This just deserializes, signing happens in the wallet via adapter/keypair
- */
-export function deserializeTransaction(swapTransaction: string): VersionedTransaction {
-    const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
-    return VersionedTransaction.deserialize(swapTransactionBuf);
-}
+// Helper to deserialize transaction (if needed for client-side signing, but we send base64 to background)
+// We can keep the existing deserializeTransaction if it's used elsewhere, or remove it if unused.
+// For now, we just return the base64 string.

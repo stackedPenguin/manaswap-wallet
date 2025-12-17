@@ -1,4 +1,4 @@
-import { getNetworkConfig, NETWORKS, checkNetworkHealth, type NetworkClusterId, type NetworkHealth } from '../shared/networks';
+import { getNetworkConfig, NETWORKS, getAllNetworks, checkNetworkHealth, type NetworkClusterId, type NetworkHealth } from '../shared/networks';
 import { defaultSettings, readSettings, writeSettings } from '../shared/settings';
 import type { DAppPermission, ManaswapMessage, Notification, PendingRequest, SiteDetectionPayload, WalletSettings } from '../shared/types';
 import { fetchAccountBalance } from '../shared/balances';
@@ -19,10 +19,14 @@ import {
   revealMnemonic,
   addKeySource,
   getMainKeypair,
+  getAccountKeypair,
   setAccountLabel
 } from './vault';
-import { Connection } from '@solana/web3.js';
+import { Connection, VersionedTransaction, Transaction } from '@solana/web3.js';
+import nacl from 'tweetnacl';
 import { getLedgerAccounts } from './ledger';
+import { savePortfolioDataPoint } from '../shared/portfolio';
+import { fetchJupiterPerpsPositions, calculatePositionPnl } from '../shared/perps';
 
 // In-memory cache for network health
 const networkHealthCache = new Map<NetworkClusterId, NetworkHealth>();
@@ -42,7 +46,11 @@ const PERMISSIONS_STORAGE_KEY = 'manaswap:permissions';
 let permissionsCache: DAppPermission[] = [];
 
 // Pending dApp requests
-const pendingRequests = new Map<string, PendingRequest>();
+const pendingRequests = new Map<string, PendingRequest & { icon?: string }>();
+
+// Callbacks for pending dApp requests (stored separately because functions can't be serialized)
+type ResponseCallback = (response: unknown) => void;
+const pendingResponders = new Map<string, ResponseCallback>();
 
 // Load permissions from storage
 async function loadPermissions(): Promise<DAppPermission[]> {
@@ -73,7 +81,144 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 
   // Start periodic health checks
   startHealthCheckPolling();
+
+  // Create portfolio tracking alarm
+  chrome.alarms.create('portfolio-tracking', { periodInMinutes: 15 });
+
+  // Setup auto-lock alarm
+  await setupAutoLockAlarm(settings.autoLockMinutes);
 });
+
+// Track last activity time for auto-lock
+let lastActivityTime = Date.now();
+
+// Update activity time whenever a message is received
+function updateActivityTime() {
+  lastActivityTime = Date.now();
+}
+
+// Setup or update auto-lock alarm
+async function setupAutoLockAlarm(minutes: number) {
+  // Clear existing auto-lock alarm
+  await chrome.alarms.clear('auto-lock');
+
+  if (minutes > 0) {
+    // Create alarm to check for inactivity every minute
+    chrome.alarms.create('auto-lock', { periodInMinutes: 1 });
+    console.log(`[Background] Auto-lock set to ${minutes} minutes`);
+  } else {
+    console.log('[Background] Auto-lock disabled');
+  }
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'portfolio-tracking') {
+    await trackPortfolioValue();
+  } else if (alarm.name === 'auto-lock') {
+    await checkAutoLock();
+  }
+});
+
+async function checkAutoLock() {
+  const settings = await readSettings();
+  const vaultState = await getVaultState();
+
+  // Skip if already locked or auto-lock disabled
+  if (vaultState.isLocked || settings.autoLockMinutes === 0) return;
+
+  const inactiveMs = Date.now() - lastActivityTime;
+  const autoLockMs = settings.autoLockMinutes * 60 * 1000;
+
+  if (inactiveMs >= autoLockMs) {
+    console.log('[Background] Auto-locking due to inactivity');
+    await lockVault();
+  }
+}
+
+async function trackPortfolioValue() {
+  try {
+    const settings = await readSettings();
+    if (!settings.selectedAccountAddress) return;
+
+    const address = settings.selectedAccountAddress;
+
+    // Usually portfolio value is USD, so we need prices.
+    // We should probably track for all networks or just the active one?
+    // Let's track for the active account across all networks (unified).
+
+    console.log('[Background] Tracking portfolio value for', address);
+
+    // 1. Fetch Balances (SOL + SPL)
+    // We need to fetch balances for all networks to get a total "Net Worth"
+    const allNetworks = getAllNetworks(settings.customNetworks);
+    const balances = await Promise.all(allNetworks.map(n => fetchAccountBalance(address, n.id, settings.customNetworks).catch(() => null)));
+
+    const allMints = new Set<string>(['So11111111111111111111111111111111111111112']);
+    let totalSolBalance = 0;
+    const tokenBalances: { mint: string; amount: number }[] = [];
+
+    balances.forEach(b => {
+      if (b) {
+        totalSolBalance += b.solBalance;
+        b.tokens.forEach(t => {
+          allMints.add(t.mint);
+          tokenBalances.push({ mint: t.mint, amount: Number(t.amount) / Math.pow(10, t.decimals) });
+        });
+      }
+    });
+
+    // 2. Fetch Perps Positions (Mainnet only)
+    let perpsValue = 0;
+    try {
+      const rpcUrl = 'https://api.mainnet-beta.solana.com'; // Use mainnet for perps
+      const connection = new Connection(rpcUrl);
+      const perps = await fetchJupiterPerpsPositions(connection, address);
+
+      // We need prices for perps too
+      perps.forEach(p => allMints.add(p.marketMint));
+
+      // We can't calculate PnL yet without prices, so store perps for later
+      // ...
+
+      // Fetch Prices
+      const prices = await fetchTokenPrices(Array.from(allMints));
+
+      // Calculate Perps Value
+      perps.forEach(pos => {
+        const currentPrice = prices.get(pos.marketMint) || 0;
+        const pnl = calculatePositionPnl(pos, currentPrice);
+        perpsValue += pos.collateralUsd + pnl - pos.borrowFee - pos.closeFee;
+      });
+
+      // Calculate Token Value
+      let tokenValue = 0;
+
+      // SOL Value
+      const solPrice = prices.get('So11111111111111111111111111111111111111112') || 0;
+      tokenValue += totalSolBalance * solPrice;
+
+      // SPL Token Value
+      tokenBalances.forEach(t => {
+        const price = prices.get(t.mint) || 0;
+        tokenValue += t.amount * price;
+      });
+
+      const totalValue = tokenValue + perpsValue;
+
+      await savePortfolioDataPoint(address, {
+        timestamp: Date.now(),
+        value: totalValue
+      });
+
+      console.log('[Background] Portfolio value tracked:', totalValue);
+
+    } catch (e) {
+      console.error('[Background] Failed to track portfolio value', e);
+    }
+  } catch (e) {
+    console.error('[Background] Error in trackPortfolioValue', e);
+  }
+}
 
 // Start periodic health check polling
 function startHealthCheckPolling() {
@@ -113,7 +258,46 @@ async function checkAllNetworksHealth() {
   });
 }
 
+// Helper to open the extension popup
+async function openPopup() {
+  try {
+    // Try to open the extension popup directly (cleaner UI)
+    // This works in newer browsers if triggered by a user gesture
+    try {
+      // @ts-ignore - openPopup is available in Chrome 99+
+      await chrome.action.openPopup();
+      return;
+    } catch (e) {
+      // Fallback if not supported or no user gesture
+      console.debug('chrome.action.openPopup failed, falling back to window', e);
+    }
+
+    // Check if a popup is already open
+    const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['popup'] });
+    const existingPopup = windows.find(w => {
+      return w.tabs?.some(t => t.url?.includes(chrome.runtime.getURL('src/pages/popup/index.html')));
+    });
+
+    if (existingPopup && existingPopup.id) {
+      await chrome.windows.update(existingPopup.id, { focused: true });
+    } else {
+      await chrome.windows.create({
+        url: 'src/pages/popup/index.html',
+        type: 'popup',
+        width: 360,
+        height: 600,
+        focused: true,
+      });
+    }
+  } catch (error) {
+    console.error('[Manaswap] Failed to open popup', error);
+  }
+}
+
 chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendResponse) => {
+  // Track activity for auto-lock
+  updateActivityTime();
+
   (async () => {
     switch (message.type) {
       case 'manaswap:getSettings': {
@@ -125,6 +309,8 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
         const next = normalizeSettings(message.payload);
         await writeSettings(next);
         await syncBadge(next);
+        // Update auto-lock timer if changed
+        await setupAutoLockAlarm(next.autoLockMinutes ?? 10);
         sendResponse({ settings: next });
         break;
       }
@@ -303,12 +489,14 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       case 'manaswap:getBalance':
       case 'manaswap:refreshBalance': {
         try {
-          console.log('[Background] Received getBalance request for', message.payload.address);
+          console.log('[Background] Received getBalance request for', message.payload.address, 'network:', message.payload.networkId);
+          const settings = await readSettings();
           const balance = await fetchAccountBalance(
             message.payload.address,
-            message.payload.networkId
+            message.payload.networkId,
+            settings.customNetworks || []
           );
-          console.log('[Background] Balance fetched successfully', balance);
+          console.log('[Background] Balance for', message.payload.networkId, ':', balance.solBalance, 'tokens:', balance.tokens.length);
           sendResponse({ success: true, balance });
         } catch (e: any) {
           console.error('[Background] Failed to fetch balance', e);
@@ -337,25 +525,123 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
         }
         break;
       }
+      case 'manaswap:executeSwap': {
+        try {
+          const { swapTransactionBase64 } = message.payload;
+
+          // Get current settings and selected account
+          const settings = await readSettings();
+          if (!settings.selectedAccountAddress) {
+            throw new Error('No account selected');
+          }
+
+          const keypair = getAccountKeypair(settings.selectedAccountAddress);
+
+          // Decode the base64 transaction
+          const transactionBuffer = Buffer.from(swapTransactionBase64, 'base64');
+          const transaction = VersionedTransaction.deserialize(transactionBuffer);
+
+          // Sign the transaction
+          transaction.sign([keypair]);
+
+          // Get current network and send
+          const config = getNetworkConfig(settings.selectedNetwork, settings.customNetworks);
+          const connection = new Connection(config.rpcUrl, 'confirmed');
+
+          // Send and confirm
+          const signature = await connection.sendTransaction(transaction, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          });
+
+          console.log('[Background] Swap executed:', signature);
+          sendResponse({ success: true, signature });
+        } catch (e: any) {
+          console.error('[Background] Swap execution failed:', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
       // dApp Handlers
       case 'manaswap:dappConnect': {
         try {
           const hostname = normalizeHostname(message.payload.hostname);
           const origin = message.payload.origin;
+          console.log('[dAppConnect] Connecting from:', origin);
 
           // Check if already has permission
-          const existing = permissionsCache.find((p) => p.origin === origin);
-          if (existing) {
-            // Update last used
-            existing.lastUsed = Date.now();
+          const existingIndex = permissionsCache.findIndex((p) => p.origin === origin);
+          console.log('[dAppConnect] Existing permission index:', existingIndex);
+
+          if (existingIndex !== -1) {
+            // Get currently selected account
+            const settings = await readSettings();
+            console.log('[dAppConnect] Settings selectedAccountAddress:', settings.selectedAccountAddress);
+
+            // Check vault state first
+            const vaultState = await getVaultState();
+            console.log('[dAppConnect] Vault state:', vaultState);
+
+            if (vaultState.isLocked) {
+              // Vault is locked - we can't access the keypair
+              // For reconnection with existing permission, use the selected account address from settings
+              // If that's not set, return error asking user to unlock
+              if (settings.selectedAccountAddress) {
+                console.log('[dAppConnect] Vault locked, using settings.selectedAccountAddress:', settings.selectedAccountAddress);
+
+                // Update permission with the selected account address
+                permissionsCache[existingIndex] = {
+                  ...permissionsCache[existingIndex],
+                  publicKey: settings.selectedAccountAddress,
+                  lastUsed: Date.now(),
+                };
+                await savePermissions(permissionsCache);
+
+                sendResponse({
+                  success: true,
+                  data: {
+                    publicKey: settings.selectedAccountAddress,
+                    networkId: settings.selectedNetwork,
+                  },
+                });
+                break;
+              } else {
+                console.log('[dAppConnect] Vault locked and no selectedAccountAddress - returning error');
+                sendResponse({ success: false, error: 'Wallet is locked. Please unlock to connect.' });
+                break;
+              }
+            }
+
+            // Vault is unlocked - get the keypair for the selected account
+            let keypair;
+            try {
+              if (settings.selectedAccountAddress) {
+                console.log('[dAppConnect] Using getAccountKeypair for:', settings.selectedAccountAddress);
+                keypair = getAccountKeypair(settings.selectedAccountAddress);
+              } else {
+                console.log('[dAppConnect] No selectedAccountAddress, using getMainKeypair');
+                keypair = getMainKeypair();
+              }
+            } catch (e) {
+              console.log('[dAppConnect] getAccountKeypair failed, fallback to getMainKeypair:', e);
+              keypair = getMainKeypair();
+            }
+
+            const selectedPubkey = keypair.publicKey.toBase58();
+            console.log('[dAppConnect] Returning publicKey:', selectedPubkey);
+
+            // Update permission with current account and timestamp
+            permissionsCache[existingIndex] = {
+              ...permissionsCache[existingIndex],
+              publicKey: selectedPubkey,
+              lastUsed: Date.now(),
+            };
             await savePermissions(permissionsCache);
 
-            const keypair = getMainKeypair();
-            const settings = await readSettings();
             sendResponse({
               success: true,
               data: {
-                publicKey: keypair.publicKey.toBase58(),
+                publicKey: selectedPubkey,
                 networkId: settings.selectedNetwork,
               },
             });
@@ -369,11 +655,19 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             type: 'connect',
             origin,
             hostname,
+            icon: message.payload.icon,
             timestamp: Date.now(),
           };
           pendingRequests.set(requestId, request);
 
-          sendResponse({ success: true, requestId });
+          // Store the sendResponse callback so we can call it when user approves/rejects
+          pendingResponders.set(requestId, sendResponse);
+
+          // Open popup to prompt user
+          void openPopup();
+
+          // Return true to indicate we will respond asynchronously
+          return true;
         } catch (e: any) {
           sendResponse({ success: false, error: e.message });
         }
@@ -395,49 +689,61 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       }
       case 'manaswap:dappSignTransaction':
       case 'manaswap:dappSignAllTransactions':
-      case 'manaswap:dappSignMessage': {
+      case 'manaswap:dappSignMessage':
+      case 'manaswap:dappSignAndSendTransaction': {
         try {
           const origin = message.payload.origin;
+          console.log('[dappSign] Received sign request from:', origin, 'type:', message.type);
 
           // Check permission
           const permission = permissionsCache.find((p) => p.origin === origin);
           if (!permission) {
+            console.log('[dappSign] Not connected, rejecting');
             sendResponse({ success: false, error: 'Not connected' });
             break;
           }
 
           // Create pending request
           const requestId = `${message.type}-${Date.now()}-${Math.random()}`;
-          let payload: unknown;
-          let requestType: 'sign-transaction' | 'sign-all-transactions' | 'sign-message';
-
-          if (message.type === 'manaswap:dappSignTransaction') {
-            requestType = 'sign-transaction';
-            payload = (message.payload as { transaction: unknown }).transaction;
-          } else if (message.type === 'manaswap:dappSignAllTransactions') {
-            requestType = 'sign-all-transactions';
-            payload = (message.payload as { transactions: unknown[] }).transactions;
-          } else {
-            requestType = 'sign-message';
-            payload = (message.payload as { message: Uint8Array }).message;
-          }
-
-          const request: PendingRequest = {
+          let request: PendingRequest;
+          const baseRequest = {
             id: requestId,
-            type: requestType,
             origin,
             hostname: permission.hostname,
-            payload,
             timestamp: Date.now(),
           };
+
+          if (message.type === 'manaswap:dappSignTransaction') {
+            const txPayload = (message.payload as { transaction: number[] }).transaction;
+            request = { ...baseRequest, type: 'sign-transaction', payload: txPayload };
+          } else if (message.type === 'manaswap:dappSignAllTransactions') {
+            const txsPayload = (message.payload as { transactions: number[][] }).transactions;
+            request = { ...baseRequest, type: 'sign-all-transactions', payload: txsPayload };
+          } else if (message.type === 'manaswap:dappSignAndSendTransaction') {
+            const signSendPayload = message.payload as { transaction: number[]; options?: { skipPreflight?: boolean } };
+            request = { ...baseRequest, type: 'sign-and-send-transaction', payload: signSendPayload.transaction, options: signSendPayload.options };
+          } else {
+            const msgPayload = Array.from((message.payload as { message: Uint8Array }).message);
+            request = { ...baseRequest, type: 'sign-message', payload: msgPayload };
+          }
           pendingRequests.set(requestId, request);
+          console.log('[dappSign] Created pending request:', requestId);
+
+          // Store the sendResponse callback so we can call it when user approves/rejects
+          pendingResponders.set(requestId, sendResponse);
+          console.log('[dappSign] Stored responder for requestId:', requestId);
+
+          // Open popup to prompt user
+          void openPopup();
 
           // Update last used
           permission.lastUsed = Date.now();
           await savePermissions(permissionsCache);
 
-          sendResponse({ success: true, requestId });
+          // Return true to indicate we will respond asynchronously
+          return true;
         } catch (e: any) {
+          console.error('[dappSign] Error:', e);
           sendResponse({ success: false, error: e.message });
         }
         break;
@@ -455,8 +761,45 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             break;
           }
 
-          const keypair = getMainKeypair();
           const settings = await readSettings();
+          console.log('[approveRequest] Settings selectedAccountAddress:', settings.selectedAccountAddress);
+
+          // Check vault state
+          const vaultState = await getVaultState();
+          console.log('[approveRequest] Vault state:', vaultState);
+
+          let publicKeyToUse: string;
+
+          if (vaultState.isLocked) {
+            // Vault is locked - use settings.selectedAccountAddress directly
+            if (settings.selectedAccountAddress) {
+              console.log('[approveRequest] Vault locked, using settings.selectedAccountAddress');
+              publicKeyToUse = settings.selectedAccountAddress;
+            } else {
+              console.log('[approveRequest] Vault locked and no selectedAccountAddress - error');
+              sendResponse({ success: false, error: 'Wallet is locked. Please unlock to connect.' });
+              break;
+            }
+          } else {
+            // Vault is unlocked - get keypair
+            let keypair;
+            try {
+              if (settings.selectedAccountAddress) {
+                console.log('[approveRequest] Using getAccountKeypair for:', settings.selectedAccountAddress);
+                keypair = getAccountKeypair(settings.selectedAccountAddress);
+              } else {
+                console.log('[approveRequest] No selectedAccountAddress, using getMainKeypair');
+                keypair = getMainKeypair();
+              }
+            } catch (e) {
+              console.log('[approveRequest] getAccountKeypair failed, fallback to getMainKeypair:', e);
+              keypair = getMainKeypair();
+            }
+            publicKeyToUse = keypair.publicKey.toBase58();
+          }
+
+          console.log('[approveRequest] Using publicKey:', publicKeyToUse);
+
           let result: unknown;
 
           if (request.type === 'connect') {
@@ -464,7 +807,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             const permission: DAppPermission = {
               origin: request.origin,
               hostname: request.hostname,
-              publicKey: keypair.publicKey.toBase58(),
+              publicKey: publicKeyToUse,
               networkId: settings.selectedNetwork,
               grantedAt: Date.now(),
               lastUsed: Date.now(),
@@ -472,25 +815,219 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             permissionsCache.push(permission);
             await savePermissions(permissionsCache);
             result = { publicKey: permission.publicKey };
+            console.log('[approveRequest] Connect approved, publicKey:', permission.publicKey);
           } else if (request.type === 'sign-transaction') {
-            // TODO: Implement actual transaction signing
-            result = request.payload;
+            console.log('[approveRequest] Signing single transaction');
+            // Actually sign the transaction
+            const txBytes = new Uint8Array(request.payload as number[]);
+            console.log('[approveRequest] Transaction bytes length:', txBytes.length);
+
+            // Try to deserialize as versioned transaction first
+            let signedTx: Uint8Array;
+            try {
+              const tx = VersionedTransaction.deserialize(txBytes);
+              console.log('[approveRequest] Deserialized as VersionedTransaction');
+
+              // Get keypair for currently selected account
+              const settings = await readSettings();
+              let keypair;
+              try {
+                keypair = settings.selectedAccountAddress
+                  ? getAccountKeypair(settings.selectedAccountAddress)
+                  : getMainKeypair();
+              } catch (e) {
+                keypair = getMainKeypair();
+              }
+              console.log('[approveRequest] Signing with keypair:', keypair.publicKey.toBase58());
+
+              tx.sign([keypair]);
+              signedTx = tx.serialize();
+              console.log('[approveRequest] Signed transaction, new length:', signedTx.length);
+            } catch (versionedError) {
+              console.log('[approveRequest] Not a VersionedTransaction, trying legacy:', versionedError);
+              // Try legacy transaction
+              const tx = Transaction.from(txBytes);
+
+              const settings = await readSettings();
+              let keypair;
+              try {
+                keypair = settings.selectedAccountAddress
+                  ? getAccountKeypair(settings.selectedAccountAddress)
+                  : getMainKeypair();
+              } catch (e) {
+                keypair = getMainKeypair();
+              }
+              console.log('[approveRequest] Signing legacy tx with keypair:', keypair.publicKey.toBase58());
+
+              tx.partialSign(keypair);
+              signedTx = tx.serialize({ requireAllSignatures: false });
+              console.log('[approveRequest] Signed legacy transaction, new length:', signedTx.length);
+            }
+
+            result = { transaction: Array.from(signedTx) };
+            console.log('[approveRequest] Transaction signed successfully');
           } else if (request.type === 'sign-all-transactions') {
-            // TODO: Implement actual transaction signing
-            result = request.payload;
+            console.log('[approveRequest] Signing multiple transactions');
+            const transactions = request.payload as number[][];
+            const signedTransactions: number[][] = [];
+
+            const settings = await readSettings();
+            let keypair;
+            try {
+              keypair = settings.selectedAccountAddress
+                ? getAccountKeypair(settings.selectedAccountAddress)
+                : getMainKeypair();
+            } catch (e) {
+              keypair = getMainKeypair();
+            }
+            console.log('[approveRequest] Signing with keypair:', keypair.publicKey.toBase58());
+
+
+
+            for (let i = 0; i < transactions.length; i++) {
+              const txBytes = new Uint8Array(transactions[i]);
+              console.log(`[approveRequest] Signing tx ${i + 1}/${transactions.length}`);
+
+              try {
+                const tx = VersionedTransaction.deserialize(txBytes);
+                tx.sign([keypair]);
+                signedTransactions.push(Array.from(tx.serialize()));
+              } catch {
+                const tx = Transaction.from(txBytes);
+                tx.partialSign(keypair);
+                signedTransactions.push(Array.from(tx.serialize({ requireAllSignatures: false })));
+              }
+            }
+
+            result = { transactions: signedTransactions };
+            console.log('[approveRequest] All transactions signed');
           } else if (request.type === 'sign-message') {
-            // TODO: Implement actual message signing
-            result = { signature: new Uint8Array(64) }; // Placeholder
+            console.log('[approveRequest] Signing message');
+            const messageBytes = new Uint8Array(request.payload as number[]);
+
+            const settings = await readSettings();
+            let keypair;
+            try {
+              keypair = settings.selectedAccountAddress
+                ? getAccountKeypair(settings.selectedAccountAddress)
+                : getMainKeypair();
+            } catch (e) {
+              keypair = getMainKeypair();
+            }
+            console.log('[approveRequest] Signing message with keypair:', keypair.publicKey.toBase58());
+
+            // Sign the message using tweetnacl
+            const signature = nacl.sign.detached(messageBytes, keypair.secretKey);
+
+            result = { signature: Array.from(signature) };
+            console.log('[approveRequest] Message signed, signature length:', signature.length);
+          } else if (request.type === 'sign-and-send-transaction') {
+            console.log('[approveRequest] Sign and send transaction');
+            const txBytes = new Uint8Array(request.payload as number[]);
+            const txOptions = (request as any).options || {};
+
+            const settings = await readSettings();
+            let keypair;
+            try {
+              keypair = settings.selectedAccountAddress
+                ? getAccountKeypair(settings.selectedAccountAddress)
+                : getMainKeypair();
+            } catch (e) {
+              keypair = getMainKeypair();
+            }
+            console.log('[approveRequest] Signing with keypair:', keypair.publicKey.toBase58());
+
+            // Use the wallet's CURRENT selected network (user's explicit choice)
+            // NOT the permission's stored networkId - that would override user's selection
+            const networkToUse = settings.selectedNetwork;
+            console.log('[approveRequest] Using current wallet network:', networkToUse);
+
+            // Get connection for current network
+            const config = getNetworkConfig(networkToUse, settings.customNetworks);
+            const connection = new Connection(config.rpcUrl, 'confirmed');
+            console.log('[approveRequest] RPC URL:', config.rpcUrl);
+
+            let txSignature: string;
+            try {
+              // Try versioned transaction first
+              const tx = VersionedTransaction.deserialize(txBytes);
+
+              // Just sign and send - do NOT modify blockhash (would invalidate dApp's signatures)
+              tx.sign([keypair]);
+              const serialized = tx.serialize();
+
+              txSignature = await connection.sendRawTransaction(serialized, {
+                skipPreflight: txOptions.skipPreflight || false,
+                preflightCommitment: 'confirmed',
+                maxRetries: 3,
+              });
+              console.log('[approveRequest] Sent versioned transaction:', txSignature);
+            } catch (versionedError) {
+              console.log('[approveRequest] Trying legacy transaction:', versionedError);
+              // Try legacy transaction
+              const tx = Transaction.from(txBytes);
+
+              // Just sign - do NOT modify blockhash
+              tx.partialSign(keypair);
+
+              txSignature = await connection.sendRawTransaction(tx.serialize(), {
+                skipPreflight: txOptions.skipPreflight || false,
+                preflightCommitment: 'confirmed',
+                maxRetries: 3,
+              });
+              console.log('[approveRequest] Sent legacy transaction:', txSignature);
+            }
+
+            result = { signature: txSignature };
+            console.log('[approveRequest] Transaction sent successfully');
+          } else if (request.type === 'switch-chain') {
+            console.log('[approveRequest] Switching chain');
+            const payload = request.payload as { targetNetworkId: string; targetNetworkName: string };
+
+            // Actually switch the network
+            const settings = await readSettings();
+            const newSettings = { ...settings, selectedNetwork: payload.targetNetworkId };
+            await writeSettings(newSettings);
+            await syncBadge(newSettings);
+
+            console.log('[approveRequest] Network switched to:', payload.targetNetworkId);
+            result = { success: true };
           }
 
           pendingRequests.delete(message.payload.requestId);
+          console.log('[approveRequest] Deleted pending request, calling responder');
+
+          // Call the original responder to complete the dApp connection
+          const responder = pendingResponders.get(message.payload.requestId);
+          if (responder) {
+            pendingResponders.delete(message.payload.requestId);
+            console.log('[approveRequest] Calling responder with result');
+            responder({ success: true, data: result });
+          } else {
+            console.log('[approveRequest] No responder found for requestId:', message.payload.requestId);
+          }
+
           sendResponse({ success: true, data: result });
+          console.log('[approveRequest] Sent response to popup');
         } catch (e: any) {
+          console.error('[approveRequest] Error:', e);
+          // Also notify original responder of error
+          const responder = pendingResponders.get(message.payload.requestId);
+          if (responder) {
+            pendingResponders.delete(message.payload.requestId);
+            responder({ success: false, error: e.message });
+          }
           sendResponse({ success: false, error: e.message });
         }
         break;
       }
       case 'manaswap:rejectRequest': {
+        // Notify original responder of rejection
+        const responder = pendingResponders.get(message.payload.requestId);
+        if (responder) {
+          pendingResponders.delete(message.payload.requestId);
+          responder({ success: false, error: 'User rejected the request' });
+        }
         pendingRequests.delete(message.payload.requestId);
         sendResponse({ success: true });
         break;
@@ -508,6 +1045,83 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           }
           sendResponse({ success: true });
         } catch (e: any) {
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:dappGetNetwork': {
+        try {
+          const origin = message.payload.origin;
+          // Check if dApp is connected
+          const permission = permissionsCache.find((p) => p.origin === origin);
+          if (!permission) {
+            sendResponse({ success: false, error: 'Not connected' });
+            break;
+          }
+
+          const settings = await readSettings();
+          const config = getNetworkConfig(settings.selectedNetwork, settings.customNetworks);
+          sendResponse({
+            success: true,
+            networkId: settings.selectedNetwork,
+            name: config.label,
+            rpcUrl: config.rpcUrl,
+          });
+        } catch (e: any) {
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:dappSwitchChain': {
+        try {
+          const origin = message.payload.origin;
+          const targetNetworkId = message.payload.networkId;
+          console.log('[dappSwitchChain] Request from:', origin, 'target:', targetNetworkId);
+
+          // Check if dApp is connected
+          const permission = permissionsCache.find((p) => p.origin === origin);
+          if (!permission) {
+            sendResponse({ success: false, error: 'Not connected' });
+            break;
+          }
+
+          // Validate target network exists
+          const settings = await readSettings();
+          const allNetworks = [...NETWORKS, ...(settings.customNetworks || [])];
+          const targetNetwork = allNetworks.find((n) => n.id === targetNetworkId);
+          if (!targetNetwork) {
+            sendResponse({ success: false, error: `Unknown network: ${targetNetworkId}` });
+            break;
+          }
+
+          // If already on the requested network, return success immediately
+          if (settings.selectedNetwork === targetNetworkId) {
+            sendResponse({ success: true });
+            break;
+          }
+
+          // Create pending request for user approval
+          const requestId = `switch-chain-${Date.now()}-${Math.random()}`;
+          const request: PendingRequest = {
+            id: requestId,
+            type: 'switch-chain',
+            origin,
+            hostname: permission.hostname,
+            payload: { targetNetworkId, targetNetworkName: targetNetwork.label },
+            timestamp: Date.now(),
+          };
+          pendingRequests.set(requestId, request);
+          pendingResponders.set(requestId, sendResponse);
+
+          console.log('[dappSwitchChain] Created pending request:', requestId);
+
+          // Open popup for user approval
+          void openPopup();
+
+          // Return true to indicate async response
+          return true;
+        } catch (e: any) {
+          console.error('[dappSwitchChain] Error:', e);
           sendResponse({ success: false, error: e.message });
         }
         break;
@@ -531,6 +1145,17 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           sendResponse({ success: true, history });
         } catch (e: any) {
           console.error('History fetch failed:', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:getPortfolioHistory': {
+        try {
+          // Dynamic import to avoid circular dependencies if any, or just import at top
+          const { getPortfolioHistory } = await import('../shared/portfolio');
+          const history = await getPortfolioHistory(message.payload.address);
+          sendResponse({ success: true, history });
+        } catch (e: any) {
           sendResponse({ success: false, error: e.message });
         }
         break;
@@ -563,48 +1188,11 @@ async function handleDetection(payload: SiteDetectionPayload): Promise<WalletSet
     };
   }
 
-  if (next.autoDetectNetworks && next.selectedNetwork !== payload.detectedNetwork) {
-    next = { ...next, selectedNetwork: payload.detectedNetwork };
-
-    // Create notification for network switch
-    const network = getNetworkConfig(payload.detectedNetwork);
-    const notificationId = `network-switch-${Date.now()}`;
-    const notification: Notification = {
-      id: notificationId,
-      type: 'network-switch',
-      message: `Network automatically switched to ${network.label}`,
-      networkId: payload.detectedNetwork,
-      duration: 6000,
-    };
-    pendingNotifications.set(notificationId, notification);
-
-    // Clear notification after duration
-    setTimeout(() => {
-      pendingNotifications.delete(notificationId);
-    }, notification.duration || 5000);
-  } else if (payload.confidence >= 0.6 && next.selectedNetwork !== payload.detectedNetwork) {
-    // High confidence detection but user has auto-detect disabled or different network
-    const network = getNetworkConfig(payload.detectedNetwork);
-    const notificationId = `detection-${Date.now()}`;
-    const notification: Notification = {
-      id: notificationId,
-      type: 'detection',
-      message: `Detected ${network.label} network for this site`,
-      networkId: payload.detectedNetwork,
-      actionLabel: 'Switch',
-      onAction: async () => {
-        const updated = { ...next, selectedNetwork: payload.detectedNetwork };
-        await writeSettings(updated);
-        await syncBadge(updated);
-      },
-      duration: 8000,
-    };
-    pendingNotifications.set(notificationId, notification);
-
-    setTimeout(() => {
-      pendingNotifications.delete(notificationId);
-    }, notification.duration || 8000);
-  }
+  // DISABLED: No automatic network switching
+  // Network should only change when:
+  // 1. User explicitly switches in wallet UI
+  // 2. dApp explicitly requests via switch-chain request
+  // The auto-detect feature is disabled to prevent unexpected UX
 
   await writeSettings(next);
   await syncBadge(next);

@@ -3,8 +3,10 @@ import type { NetworkClusterId } from './networks';
 export interface WalletSettings {
   autoDetectNetworks: boolean;
   selectedNetwork: NetworkClusterId;
+  selectedAccountAddress?: string;
   siteOverrides: Record<string, NetworkClusterId>;
   customNetworks: import('./networks').NetworkConfig[];
+  autoLockMinutes: number; // Auto-lock wallet after N minutes of inactivity (0 = never)
 }
 
 export interface SiteDetectionPayload {
@@ -93,14 +95,23 @@ export interface DAppPermission {
   lastUsed: number;
 }
 
-export interface PendingRequest {
+// Base properties shared by all pending requests
+interface PendingRequestBase {
   id: string;
-  type: 'connect' | 'sign-transaction' | 'sign-all-transactions' | 'sign-message';
   origin: string;
   hostname: string;
-  payload?: unknown;
   timestamp: number;
+  icon?: string;
 }
+
+// Discriminated union for pending requests with typed payloads
+export type PendingRequest =
+  | (PendingRequestBase & { type: 'connect'; payload?: undefined })
+  | (PendingRequestBase & { type: 'sign-transaction'; payload: number[] })
+  | (PendingRequestBase & { type: 'sign-all-transactions'; payload: number[][] })
+  | (PendingRequestBase & { type: 'sign-message'; payload: number[] })
+  | (PendingRequestBase & { type: 'sign-and-send-transaction'; payload: number[]; options?: { skipPreflight?: boolean } })
+  | (PendingRequestBase & { type: 'switch-chain'; payload: { targetNetworkId: string; targetNetworkName: string } });
 
 // Re-export NetworkHealth for convenience
 export type { NetworkHealth } from './networks';
@@ -152,11 +163,12 @@ export type ManaswapMessage =
   // Transaction Messages
   | { type: 'manaswap:sendTransaction'; payload: { recipient: string; amount: number; networkId: NetworkClusterId } }
   // dApp Messages
-  | { type: 'manaswap:dappConnect'; payload: { origin: string; hostname: string } }
+  | { type: 'manaswap:dappConnect'; payload: { origin: string; hostname: string; icon?: string } }
   | { type: 'manaswap:dappDisconnect'; payload: { origin: string } }
   | { type: 'manaswap:dappSignTransaction'; payload: { origin: string; transaction: unknown } }
   | { type: 'manaswap:dappSignAllTransactions'; payload: { origin: string; transactions: unknown[] } }
   | { type: 'manaswap:dappSignMessage'; payload: { origin: string; message: Uint8Array } }
+  | { type: 'manaswap:dappSignAndSendTransaction'; payload: { origin: string; transaction: unknown; options?: { skipPreflight?: boolean } } }
   | { type: 'manaswap:getPendingRequests' }
   | { type: 'manaswap:approveRequest'; payload: { requestId: string } }
   | { type: 'manaswap:rejectRequest'; payload: { requestId: string } }
@@ -164,4 +176,8 @@ export type ManaswapMessage =
   | { type: 'manaswap:revokePermission'; payload: { origin: string } }
   | { type: 'manaswap:getTokenPrices'; payload: { mints: string[] } }
   | { type: 'manaswap:getTransactionHistory'; payload: { address: string; networkId: NetworkClusterId; limit?: number } }
-  | { type: 'manaswap:executeSwap'; payload: { swapTransactionBase64: string } };
+  | { type: 'manaswap:executeSwap'; payload: { swapTransactionBase64: string } }
+  | { type: 'manaswap:getPortfolioHistory'; payload: { address: string } }
+  // dApp Network Messages
+  | { type: 'manaswap:dappGetNetwork'; payload: { origin: string } }
+  | { type: 'manaswap:dappSwitchChain'; payload: { origin: string; networkId: string } };

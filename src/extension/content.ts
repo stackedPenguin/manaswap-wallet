@@ -4,7 +4,7 @@ import { detectNetwork } from '../shared/detection';
 
 const injectProvider = () => {
   try {
-    const url = chrome.runtime.getURL('src/provider/inject.ts');
+    const url = chrome.runtime.getURL('assets/inject.js');
     const script = document.createElement('script');
     script.type = 'module';
     script.src = url;
@@ -18,9 +18,9 @@ const injectProvider = () => {
 const detectNetworkFromLocation = (): { network: NetworkClusterId; confidence: number } | null => {
   const url = window.location.href;
   const hostname = window.location.hostname;
-  
+
   const result = detectNetwork(hostname, url);
-  
+
   if (result) {
     const confidenceMap = { high: 0.9, medium: 0.6, low: 0.3 };
     return {
@@ -28,7 +28,7 @@ const detectNetworkFromLocation = (): { network: NetworkClusterId; confidence: n
       confidence: confidenceMap[result.confidence],
     };
   }
-  
+
   return null;
 };
 
@@ -49,15 +49,15 @@ const notifyDetection = (network: NetworkClusterId, confidence: number) => {
 window.addEventListener('message', async (event) => {
   // Only process messages from the same origin
   if (event.source !== window) return;
-  
+
   if (event.data?.source === 'manaswap') {
     const { type, payload, requestId } = event.data;
     const origin = window.location.origin;
     const hostname = window.location.hostname;
-    
+
     try {
       let response: unknown;
-      
+
       switch (type) {
         case 'connect-request': {
           // Extract RPC hints if available
@@ -70,10 +70,18 @@ window.addEventListener('message', async (event) => {
               notifyDetection(result.network, confidenceMap[result.confidence]);
             }
           }
-          
+
+          const getFavicon = () => {
+            const link = document.querySelector('link[rel~="icon"]');
+            if (link && (link as HTMLLinkElement).href) {
+              return (link as HTMLLinkElement).href;
+            }
+            return '/favicon.ico'; // Fallback
+          };
+
           const connectRes = await chrome.runtime.sendMessage({
             type: 'manaswap:dappConnect',
-            payload: { origin, hostname },
+            payload: { origin, hostname, icon: getFavicon() },
           });
           response = connectRes;
           break;
@@ -110,10 +118,35 @@ window.addEventListener('message', async (event) => {
           response = signMsgRes;
           break;
         }
+        case 'get-network': {
+          const networkRes = await chrome.runtime.sendMessage({
+            type: 'manaswap:dappGetNetwork',
+            payload: { origin },
+          });
+          response = networkRes;
+          break;
+        }
+        case 'switch-chain': {
+          const switchRes = await chrome.runtime.sendMessage({
+            type: 'manaswap:dappSwitchChain',
+            payload: { origin, networkId: (payload as { networkId: string }).networkId },
+          });
+          response = switchRes;
+          break;
+        }
+        case 'sign-and-send-transaction': {
+          const { transaction, options } = payload as { transaction: unknown; options?: { skipPreflight?: boolean } };
+          const signSendRes = await chrome.runtime.sendMessage({
+            type: 'manaswap:dappSignAndSendTransaction',
+            payload: { origin, transaction, options },
+          });
+          response = signSendRes;
+          break;
+        }
         default:
           response = { success: false, error: 'Unknown request type' };
       }
-      
+
       // Send response back to provider
       window.postMessage(
         {

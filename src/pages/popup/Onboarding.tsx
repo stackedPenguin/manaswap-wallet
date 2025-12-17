@@ -122,17 +122,30 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         padding: '32px 24px',
         textAlign: 'center',
       }}>
-        <div className="logo" style={{
-          width: '96px',
-          height: '96px',
-          fontSize: '40px',
+        <div className="logo-container" style={{
           marginBottom: '32px',
-          boxShadow: '0 8px 32px rgba(59, 130, 246, 0.4)',
-          animation: 'pulse 2s ease-in-out infinite',
+          position: 'relative',
         }}>
-          MW
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(circle, rgba(59, 130, 246, 0.2) 0%, transparent 70%)',
+            filter: 'blur(20px)',
+            zIndex: 0,
+          }} />
+          <img
+            src="/icons/manaswap.png"
+            alt="Manaswap Logo"
+            style={{
+              width: '96px',
+              height: '96px',
+              position: 'relative',
+              zIndex: 1,
+              borderRadius: '24px',
+            }}
+          />
         </div>
-        
+
         <h1 style={{
           margin: '0 0 12px 0',
           fontSize: '2rem',
@@ -144,7 +157,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         }}>
           Manaswap Wallet
         </h1>
-        
+
         <p style={{
           color: 'var(--text-secondary)',
           margin: '0 0 48px 0',
@@ -154,7 +167,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         }}>
           Secure, self-custodial wallet for Solana and X1 networks
         </p>
-        
+
         <div style={{ width: '100%', maxWidth: '320px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <button
             onClick={handleStartCreate}
@@ -342,7 +355,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
             <strong>Write these words down and save them securely.</strong> If you lose them, you will lose access to your funds forever. Never share your recovery phrase with anyone.
           </span>
         </p>
-        
+
         <div className="mnemonic-box" style={{
           marginBottom: '24px',
           padding: '20px',

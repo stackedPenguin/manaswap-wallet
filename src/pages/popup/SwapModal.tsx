@@ -163,9 +163,11 @@ export function SwapModal({ isOpen, onClose, userTokens, userAddress, onSuccess 
                                 placeholder="0.00"
                                 value={amount}
                                 onChange={e => setAmount(e.target.value)}
+                                onWheel={e => e.currentTarget.blur()}
                                 style={{
                                     background: 'transparent', border: 'none', color: 'var(--text-primary)',
-                                    fontSize: '1.5rem', fontWeight: 'bold', flex: 1, outline: 'none', minWidth: 0
+                                    fontSize: '1.5rem', fontWeight: 'bold', flex: 1, outline: 'none', minWidth: 0,
+                                    MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield'
                                 }}
                             />
                             <button

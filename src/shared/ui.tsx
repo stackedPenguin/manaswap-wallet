@@ -92,7 +92,11 @@ import {
   Wallet,
   Settings,
   Plus,
-  HardDrive
+  HardDrive,
+  Layers,
+  Eye,
+  EyeOff,
+  Globe
 } from 'lucide-react';
 
 // Icon Components
@@ -117,5 +121,9 @@ export const Icons = {
   Hardware: (props: any) => <HardDrive size={16} {...props} />,
   X: (props: any) => <X size={18} {...props} />,
   ArrowDown: (props: any) => <ArrowDown size={18} {...props} />,
+  DeFi: (props: any) => <Layers size={16} {...props} />,
+  Eye: (props: any) => <Eye size={16} {...props} />,
+  EyeOff: (props: any) => <EyeOff size={16} {...props} />,
+  Network: (props: any) => <Globe size={16} {...props} />,
 };
 

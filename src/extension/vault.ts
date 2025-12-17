@@ -7,18 +7,84 @@ import { derivePath } from 'ed25519-hd-key';
 import bs58 from 'bs58';
 
 const VAULT_STORAGE_KEY = 'manaswap:vault';
-const LOCK_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const SESSION_KEYRING_KEY = 'manaswap:session:keyring';
+const SESSION_PASSWORD_KEY = 'manaswap:session:password';
+const SESSION_UNLOCK_TIME_KEY = 'manaswap:session:unlockTime';
+const LOCK_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes (fallback, settings takes priority)
 
 let keyring: KeyringData | null = null;
 let lockTimer: any = null; // Return type of setTimeout depends on env
+let cachedPassword: string | null = null; // Internal password cache (cleared on lock)
 
 export async function isVaultInitialized(): Promise<boolean> {
   const stored = await chrome.storage.local.get(VAULT_STORAGE_KEY);
   return !!stored[VAULT_STORAGE_KEY];
 }
 
+// Restore keyring from session storage if available (handles service worker restart)
+async function restoreFromSession(): Promise<boolean> {
+  if (keyring !== null) return true; // Already restored
+
+  try {
+    const session = await chrome.storage.session.get([
+      SESSION_KEYRING_KEY,
+      SESSION_PASSWORD_KEY,
+      SESSION_UNLOCK_TIME_KEY
+    ]);
+
+    const keyringStr = session[SESSION_KEYRING_KEY] as string | undefined;
+    const passwordStr = session[SESSION_PASSWORD_KEY] as string | undefined;
+
+    if (keyringStr && passwordStr) {
+      keyring = JSON.parse(keyringStr) as KeyringData;
+      cachedPassword = passwordStr;
+      console.log('[Vault] Restored keyring from session storage');
+      return true;
+    }
+  } catch (e) {
+    console.error('[Vault] Failed to restore from session', e);
+  }
+  return false;
+}
+
+// Save keyring to session storage for persistence across service worker restarts
+async function saveToSession(): Promise<void> {
+  if (!keyring || !cachedPassword) return;
+
+  try {
+    await chrome.storage.session.set({
+      [SESSION_KEYRING_KEY]: JSON.stringify(keyring),
+      [SESSION_PASSWORD_KEY]: cachedPassword,
+      [SESSION_UNLOCK_TIME_KEY]: Date.now()
+    });
+    console.log('[Vault] Saved keyring to session storage');
+  } catch (e) {
+    console.error('[Vault] Failed to save to session', e);
+  }
+}
+
+// Clear session storage on lock
+async function clearSession(): Promise<void> {
+  try {
+    await chrome.storage.session.remove([
+      SESSION_KEYRING_KEY,
+      SESSION_PASSWORD_KEY,
+      SESSION_UNLOCK_TIME_KEY
+    ]);
+    console.log('[Vault] Cleared session storage');
+  } catch (e) {
+    console.error('[Vault] Failed to clear session', e);
+  }
+}
+
 export async function getVaultState(): Promise<VaultState> {
   const initialized = await isVaultInitialized();
+
+  // Try to restore from session if keyring is null
+  if (initialized && keyring === null) {
+    await restoreFromSession();
+  }
+
   return {
     isInitialized: initialized,
     isLocked: initialized && keyring === null,
@@ -221,7 +287,33 @@ export function getAccountKeypair(address: string): Keypair {
       if (source.type === 'mnemonic') {
         return getDerivedKeypair(source, account.index);
       } else if (source.type === 'privateKey') {
-        const secretKey = bs58.decode(source.value);
+        // Handle multiple private key formats:
+        // 1. Base58 encoded string
+        // 2. JSON array format like [1,2,3,...]
+        let secretKey: Uint8Array;
+        const value = source.value.trim();
+
+        if (value.startsWith('[')) {
+          // JSON array format
+          try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) {
+              secretKey = new Uint8Array(parsed);
+            } else {
+              throw new Error('Invalid JSON array format');
+            }
+          } catch (e) {
+            throw new Error('Failed to parse private key as JSON array');
+          }
+        } else {
+          // Try base58 decode
+          try {
+            secretKey = bs58.decode(value);
+          } catch (e) {
+            throw new Error('Failed to decode private key as base58');
+          }
+        }
+
         return Keypair.fromSecretKey(secretKey);
       }
     }
@@ -342,12 +434,10 @@ async function saveVault() {
   await saveKeyring();
 }
 
-// Internal password cache (cleared on lock)
-let cachedPassword: string | null = null;
-
 export async function unlockVaultWithCaching(password: string): Promise<void> {
   await unlockVault(password);
-  // cachedPassword is now set in unlockVault
+  // Save to session storage for persistence across service worker restarts
+  await saveToSession();
 }
 
 export async function saveKeyring(): Promise<void> {
@@ -401,6 +491,8 @@ export async function lockVault(): Promise<void> {
   cachedPassword = null;
   if (lockTimer) clearTimeout(lockTimer);
   lockTimer = null;
+  // Clear session storage
+  await clearSession();
 }
 
 // Internal helper to keep the session alive
@@ -529,6 +621,69 @@ export async function addKeySource(type: KeySourceType, value?: string, label?: 
         index: 0,
         label: label || 'Wallet 1',
         type: 'derived',
+        sourceId: sourceId
+      }]
+    });
+  } else if (type === 'privateKey') {
+    // Handle private key import
+    if (!value) {
+      throw new Error('Private key is required');
+    }
+
+    // Validate key - support both base58 and JSON array [x,x,x,...] formats
+    let secretKey: Uint8Array;
+    const trimmedValue = value.trim();
+
+    console.log('[Vault] Private key import attempt:', {
+      valueLength: trimmedValue.length,
+      startsWithBracket: trimmedValue.startsWith('['),
+      endsWithBracket: trimmedValue.endsWith(']'),
+      first20chars: trimmedValue.slice(0, 20),
+    });
+
+    try {
+      if (trimmedValue.startsWith('[') && trimmedValue.endsWith(']')) {
+        // JSON array format: [129, 102, ..., 10]
+        console.log('[Vault] Detected JSON array format');
+        const parsed = JSON.parse(trimmedValue);
+        console.log('[Vault] Parsed array length:', parsed?.length);
+        if (!Array.isArray(parsed) || parsed.length !== 64) {
+          throw new Error(`Invalid key length - expected 64 bytes, got ${parsed?.length || 'not an array'}`);
+        }
+        secretKey = new Uint8Array(parsed);
+      } else {
+        // Base58 format
+        console.log('[Vault] Detected Base58 format');
+        secretKey = bs58.decode(trimmedValue);
+        console.log('[Vault] Decoded length:', secretKey.length);
+        if (secretKey.length !== 64) throw new Error(`Invalid key length - expected 64, got ${secretKey.length}`);
+      }
+    } catch (e: any) {
+      console.error('[Vault] Private key import error:', e);
+      throw new Error(e.message || 'Invalid private key format');
+    }
+
+    const kp = Keypair.fromSecretKey(secretKey);
+    const address = kp.publicKey.toBase58();
+
+    // Check if already exists in any source
+    for (const source of keyring.sources) {
+      if (source.accounts.some(a => a.address === address)) {
+        throw new Error('Account already imported');
+      }
+    }
+
+    const sourceId = crypto.randomUUID();
+    keyring.sources.push({
+      id: sourceId,
+      type: 'privateKey',
+      value: value,
+      label: label || `Imported ${address.slice(0, 4)}...`,
+      accounts: [{
+        address,
+        index: -1,
+        label: label || `Imported ${address.slice(0, 4)}...`,
+        type: 'imported',
         sourceId: sourceId
       }]
     });

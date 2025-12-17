@@ -208,13 +208,18 @@ export function AddWalletModal({ onClose, onSuccess }: ModalProps) {
                     </div>
                 </>
             ) : mode === 'import-pk' && (
-                <textarea
-                    className="mnemonic-input"
-                    placeholder="Enter Private Key (Base58)..."
-                    value={value}
-                    onChange={e => setValue(e.target.value)}
-                    style={{ marginBottom: '16px', height: '80px' }}
-                />
+                <>
+                    <textarea
+                        className="mnemonic-input"
+                        placeholder="Enter Private Key..."
+                        value={value}
+                        onChange={e => setValue(e.target.value)}
+                        style={{ marginBottom: '8px', height: '80px' }}
+                    />
+                    <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0 0 16px', textAlign: 'center' }}>
+                        Supports Base58 or JSON array format [x,x,x,...]
+                    </p>
+                </>
             )}
 
             {error && <div className="error-msg" style={{ marginBottom: '16px' }}>{error}</div>}
@@ -344,7 +349,7 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
     );
 }
 
-export function AccountManagement({ onClose }: { onClose: () => void }) {
+export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () => void; onAccountsChanged?: () => void }) {
     const [accounts, setAccounts] = useState<AccountInfo[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [showAddWallet, setShowAddWallet] = useState(false);
@@ -424,6 +429,7 @@ export function AccountManagement({ onClose }: { onClose: () => void }) {
                     onSuccess={() => {
                         setShowAddWallet(false);
                         loadAccounts();
+                        onAccountsChanged?.();
                     }}
                 />
             )}
@@ -434,6 +440,7 @@ export function AccountManagement({ onClose }: { onClose: () => void }) {
                     onSuccess={() => {
                         setShowLedger(false);
                         loadAccounts();
+                        onAccountsChanged?.();
                     }}
                 />
             )}
@@ -443,13 +450,14 @@ export function AccountManagement({ onClose }: { onClose: () => void }) {
                     account={selectedAccount}
                     onClose={() => setSelectedAccount(null)}
                     onSuccess={loadAccounts}
+                    onAccountsChanged={onAccountsChanged}
                 />
             )}
         </div>
     );
 }
 
-export function AccountDetailsModal({ account, onClose, onSuccess }: { account: AccountInfo; onClose: () => void; onSuccess?: () => void }) {
+export function AccountDetailsModal({ account, onClose, onSuccess, onAccountsChanged }: { account: AccountInfo; onClose: () => void; onSuccess?: () => void; onAccountsChanged?: () => void }) {
     const [password, setPassword] = useState('');
     const [privateKey, setPrivateKey] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -645,8 +653,8 @@ export function AccountDetailsModal({ account, onClose, onSuccess }: { account: 
                         onClose={() => setShowRestoreModal(false)}
                         onSuccess={() => {
                             setShowRestoreModal(false);
+                            onAccountsChanged?.(); // Notify parent to refresh and select new account
                             onClose();
-                            window.location.reload();
                         }}
                     />
                 )}

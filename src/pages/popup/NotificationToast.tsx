@@ -34,27 +34,31 @@ export function NotificationToast({ notification, onDismiss }: NotificationToast
     switch (notification.type) {
       case 'network-switch':
         return {
-          bg: '#1e3a8a',
-          border: '#3b82f6',
+          bg: 'rgba(59, 130, 246, 0.12)',
+          border: 'rgba(59, 130, 246, 0.3)',
           icon: '🔄',
+          color: '#60a5fa',
         };
       case 'detection':
         return {
-          bg: '#1e293b',
-          border: '#64748b',
+          bg: 'rgba(148, 163, 184, 0.12)',
+          border: 'rgba(148, 163, 184, 0.3)',
           icon: '🔍',
+          color: '#94a3b8',
         };
       case 'warning':
         return {
-          bg: '#7f1d1d',
-          border: '#ef4444',
+          bg: 'rgba(239, 68, 68, 0.12)',
+          border: 'rgba(239, 68, 68, 0.3)',
           icon: '⚠️',
+          color: '#f87171',
         };
       default:
         return {
-          bg: '#1e293b',
-          border: '#334155',
+          bg: 'rgba(148, 163, 184, 0.12)',
+          border: 'rgba(148, 163, 184, 0.3)',
           icon: 'ℹ️',
+          color: '#94a3b8',
         };
     }
   };
@@ -65,18 +69,20 @@ export function NotificationToast({ notification, onDismiss }: NotificationToast
     <div
       style={{
         position: 'fixed',
-        bottom: '16px',
+        bottom: '48px',
         left: '16px',
         right: '16px',
         backgroundColor: styles.bg,
+        backdropFilter: 'blur(12px)',
         border: `1px solid ${styles.border}`,
-        borderRadius: '8px',
-        padding: '12px',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+        borderRadius: '12px',
+        padding: '14px',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
         zIndex: 10000,
         animation: isVisible ? 'slideUp 0.3s ease-out' : 'slideDown 0.3s ease-out',
         maxWidth: '328px',
         margin: '0 auto',
+        color: styles.color,
       }}
     >
       <style>

@@ -144,3 +144,74 @@ export async function fetchTransactionHistory(
         return [];
     }
 }
+
+export interface BalanceChange {
+    timestamp: number;
+    mint: string; // 'SOL' for native
+    amount: number; // Positive for receive, negative for send
+    signature: string;
+}
+
+export async function fetchBalanceChanges(
+    address: string
+): Promise<BalanceChange[]> {
+    try {
+        const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || '';
+        const apiKeyMatch = rpcUrl.match(/api-key=([^&]+)/);
+
+        if (!apiKeyMatch || !apiKeyMatch[1]) {
+            return [];
+        }
+
+        const apiKey = apiKeyMatch[1];
+        const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions?api-key=${apiKey}`; // Helius default limit is 100?
+
+        const response = await fetch(url);
+        if (!response.ok) return [];
+
+        const data: HeliusEnhancedTransaction[] = await response.json();
+        const changes: BalanceChange[] = [];
+
+        data.forEach(tx => {
+            if (tx.transactionError) return;
+
+            const timestamp = tx.timestamp * 1000;
+
+            // 1. Native SOL Changes
+            if (tx.nativeTransfers) {
+                tx.nativeTransfers.forEach(t => {
+                    const amount = t.amount / 1_000_000_000;
+                    if (t.toUserAccount === address) {
+                        changes.push({ timestamp, mint: 'SOL', amount: amount, signature: tx.signature });
+                    }
+                    if (t.fromUserAccount === address) {
+                        changes.push({ timestamp, mint: 'SOL', amount: -amount, signature: tx.signature });
+                    }
+                });
+            }
+
+            // 2. Token Changes
+            if (tx.tokenTransfers) {
+                tx.tokenTransfers.forEach(t => {
+                    if (t.toUserAccount === address) {
+                        changes.push({ timestamp, mint: t.mint, amount: t.tokenAmount, signature: tx.signature });
+                    }
+                    if (t.fromUserAccount === address) {
+                        changes.push({ timestamp, mint: t.mint, amount: -t.tokenAmount, signature: tx.signature });
+                    }
+                });
+            }
+
+            // 3. Fee (if payer)
+            if (tx.feePayer === address) {
+                changes.push({ timestamp, mint: 'SOL', amount: -(tx.fee / 1_000_000_000), signature: tx.signature });
+            }
+        });
+
+        return changes.sort((a, b) => b.timestamp - a.timestamp); // Newest first
+
+    } catch (error) {
+        console.error('Failed to fetch balance changes:', error);
+        return [];
+    }
+}

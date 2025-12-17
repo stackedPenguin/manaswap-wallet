@@ -35,7 +35,7 @@ export function OptionsApp() {
           sendMessage<RuntimeResponse>({ type: 'manaswap:getSettings' }),
           sendMessage<{ success: boolean; permissions?: DAppPermission[] }>({ type: 'manaswap:getPermissions' }),
         ]);
-        
+
         setSettings(settingsRes.settings);
         setOverrideNetwork(settingsRes.settings.selectedNetwork);
         if (permissionsRes.success && permissionsRes.permissions) {
@@ -47,7 +47,7 @@ export function OptionsApp() {
         setIsLoading(false);
       }
     };
-    
+
     loadData();
   }, []);
 
@@ -131,6 +131,26 @@ export function OptionsApp() {
           When enabled, Manaswap will use hostname heuristics, RPC hints, and program IDs to recommend switching to
           Solana or X1 networks before transactions are signed.
         </p>
+
+        <div className="form-row" style={{ marginTop: '24px' }}>
+          <label style={{ flexBasis: '100%' }}>Auto-Lock Timer</label>
+          <select
+            value={settings.autoLockMinutes ?? 10}
+            onChange={(event) =>
+              persistSettings({ ...settings, autoLockMinutes: parseInt(event.target.value, 10) })
+            }
+          >
+            <option value={1}>1 minute</option>
+            <option value={5}>5 minutes</option>
+            <option value={10}>10 minutes</option>
+            <option value={30}>30 minutes</option>
+            <option value={60}>1 hour</option>
+            <option value={0}>Never</option>
+          </select>
+        </div>
+        <p style={{ marginTop: 12, color: '#94a3b8' }}>
+          Automatically lock the wallet after a period of inactivity. Password will be required to unlock.
+        </p>
       </section>
 
       <section>
@@ -186,11 +206,59 @@ export function OptionsApp() {
       </section>
 
       <section>
+        <h2>Custom Networks</h2>
+        <p style={{ color: '#94a3b8', marginBottom: '16px' }}>
+          Custom RPC endpoints you've added. Built-in networks (Solana/X1 mainnet, testnet, devnet, localnet) are managed automatically.
+        </p>
+
+        {(settings.customNetworks || []).length === 0 ? (
+          <p style={{ color: '#94a3b8' }}>No custom networks configured.</p>
+        ) : (
+          <table className="overrides-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>RPC URL</th>
+                <th>Type</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(settings.customNetworks || []).map((network) => (
+                <tr key={network.id}>
+                  <td>{network.label}</td>
+                  <td style={{ fontSize: '0.85rem', color: '#94a3b8', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {network.rpcUrl}
+                  </td>
+                  <td>{network.kind}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = {
+                          ...settings,
+                          customNetworks: (settings.customNetworks || []).filter(n => n.id !== network.id)
+                        };
+                        persistSettings(next);
+                      }}
+                      style={{ color: '#ef4444' }}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section>
         <h2>Connected dApps</h2>
         <p style={{ color: '#94a3b8', marginBottom: '16px' }}>
           Sites that have permission to connect to your wallet and request transaction signatures.
         </p>
-        
+
         {permissions.length === 0 ? (
           <p style={{ color: '#94a3b8' }}>No connected dApps.</p>
         ) : (
@@ -209,7 +277,7 @@ export function OptionsApp() {
                 const network = NETWORKS.find((n) => n.id === permission.networkId);
                 const grantedDate = new Date(permission.grantedAt);
                 const lastUsedDate = new Date(permission.lastUsed);
-                
+
                 return (
                   <tr key={permission.origin}>
                     <td>

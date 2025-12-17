@@ -21,7 +21,7 @@ const manifest = defineManifest({
     '48': 'icons/icon-48.png',
     '128': 'icons/icon-128.png',
   },
-  permissions: ['storage', 'tabs', 'scripting', 'activeTab'],
+  permissions: ['storage', 'tabs', 'scripting', 'activeTab', 'alarms'],
   host_permissions: ['<all_urls>'],
   content_scripts: [
     {
@@ -32,7 +32,7 @@ const manifest = defineManifest({
   ],
   web_accessible_resources: [
     {
-      resources: ['src/provider/inject.ts'],
+      resources: ['assets/*.js', 'assets/*.css', 'assets/*.svg', 'assets/*.png'],
       matches: ['<all_urls>'],
     },
   ],
