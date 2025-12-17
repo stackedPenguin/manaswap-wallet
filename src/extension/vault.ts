@@ -315,11 +315,29 @@ export function getAccountKeypair(address: string): Keypair {
         }
 
         return Keypair.fromSecretKey(secretKey);
+      } else if (source.type === 'ledger') {
+        throw new Error('Cannot get keypair for Ledger account - use hardware signing');
       }
     }
   }
 
   throw new Error('Account not found');
+}
+
+// Get account info by address (useful for checking account type before signing)
+export function getAccountInfo(address: string): AccountInfo | null {
+  if (!keyring) {
+    return null;
+  }
+
+  for (const source of keyring.sources) {
+    const account = source.accounts.find(a => a.address === address);
+    if (account) {
+      return account;
+    }
+  }
+
+  return null;
 }
 
 // Deprecated or updated for internal use? 
@@ -686,6 +704,50 @@ export async function addKeySource(type: KeySourceType, value?: string, label?: 
         type: 'imported',
         sourceId: sourceId
       }]
+    });
+  } else if (type === 'ledger') {
+    // Handle Ledger hardware wallet
+    // Value should be JSON: { accounts: [{ address, derivationPath }] }
+    if (!value) {
+      throw new Error('Ledger account data is required');
+    }
+
+    let ledgerData: { accounts: Array<{ address: string; derivationPath: string }> };
+    try {
+      ledgerData = JSON.parse(value);
+    } catch (e) {
+      throw new Error('Invalid ledger data format');
+    }
+
+    if (!ledgerData.accounts || !Array.isArray(ledgerData.accounts) || ledgerData.accounts.length === 0) {
+      throw new Error('No ledger accounts provided');
+    }
+
+    // Check for duplicates
+    for (const acc of ledgerData.accounts) {
+      for (const source of keyring.sources) {
+        if (source.accounts.some(a => a.address === acc.address)) {
+          throw new Error(`Account ${acc.address.slice(0, 8)}... already exists`);
+        }
+      }
+    }
+
+    const sourceId = crypto.randomUUID();
+    const accounts: AccountInfo[] = ledgerData.accounts.map((acc, idx) => ({
+      address: acc.address,
+      index: idx,
+      label: label || `Ledger ${idx + 1}`,
+      type: 'ledger' as const,
+      derivationPath: acc.derivationPath,
+      sourceId: sourceId
+    }));
+
+    keyring.sources.push({
+      id: sourceId,
+      type: 'ledger',
+      value: '', // Don't store anything sensitive for ledger
+      label: label || 'Ledger Hardware Wallet',
+      accounts
     });
   } else {
     throw new Error('Unsupported key source type');

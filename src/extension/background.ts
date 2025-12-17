@@ -20,6 +20,7 @@ import {
   addKeySource,
   getMainKeypair,
   getAccountKeypair,
+  getAccountInfo,
   setAccountLabel
 } from './vault';
 import { Connection, VersionedTransaction, Transaction } from '@solana/web3.js';
@@ -713,18 +714,40 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             timestamp: Date.now(),
           };
 
+          // Check if selected account is a Ledger account
+          const settings = await readSettings();
+          const accountInfo = settings.selectedAccountAddress ? getAccountInfo(settings.selectedAccountAddress) : null;
+          const isLedgerAccount = accountInfo?.type === 'ledger';
+          const derivationPath = accountInfo?.derivationPath || "44'/501'/0'";
+
+          console.log('[dappSign] Account type:', accountInfo?.type, 'isLedger:', isLedgerAccount);
+
           if (message.type === 'manaswap:dappSignTransaction') {
             const txPayload = (message.payload as { transaction: number[] }).transaction;
-            request = { ...baseRequest, type: 'sign-transaction', payload: txPayload };
+            if (isLedgerAccount) {
+              request = { ...baseRequest, type: 'ledger-sign-transaction', payload: txPayload, derivationPath };
+            } else {
+              request = { ...baseRequest, type: 'sign-transaction', payload: txPayload };
+            }
           } else if (message.type === 'manaswap:dappSignAllTransactions') {
             const txsPayload = (message.payload as { transactions: number[][] }).transactions;
+            // Ledger can't sign multiple transactions at once - we'd need to sign each one
+            // For now, use regular type and let the approval fail with helpful error
             request = { ...baseRequest, type: 'sign-all-transactions', payload: txsPayload };
           } else if (message.type === 'manaswap:dappSignAndSendTransaction') {
             const signSendPayload = message.payload as { transaction: number[]; options?: { skipPreflight?: boolean } };
-            request = { ...baseRequest, type: 'sign-and-send-transaction', payload: signSendPayload.transaction, options: signSendPayload.options };
+            if (isLedgerAccount) {
+              request = { ...baseRequest, type: 'ledger-sign-and-send', payload: signSendPayload.transaction, derivationPath, options: signSendPayload.options };
+            } else {
+              request = { ...baseRequest, type: 'sign-and-send-transaction', payload: signSendPayload.transaction, options: signSendPayload.options };
+            }
           } else {
             const msgPayload = Array.from((message.payload as { message: Uint8Array }).message);
-            request = { ...baseRequest, type: 'sign-message', payload: msgPayload };
+            if (isLedgerAccount) {
+              request = { ...baseRequest, type: 'ledger-sign-message', payload: msgPayload, derivationPath };
+            } else {
+              request = { ...baseRequest, type: 'sign-message', payload: msgPayload };
+            }
           }
           pendingRequests.set(requestId, request);
           console.log('[dappSign] Created pending request:', requestId);
@@ -1030,6 +1053,57 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
         }
         pendingRequests.delete(message.payload.requestId);
         sendResponse({ success: true });
+        break;
+      }
+      case 'manaswap:ledgerSignResult': {
+        // Handle Ledger signing result from popup
+        const request = pendingRequests.get(message.payload.requestId);
+        const responder = pendingResponders.get(message.payload.requestId);
+
+        if (!request || !responder) {
+          sendResponse({ success: false, error: 'Request not found' });
+          break;
+        }
+
+        try {
+          const signature = new Uint8Array(message.payload.signature);
+          let result: unknown;
+
+          if (request.type === 'ledger-sign-transaction') {
+            // For sign-transaction, apply signature to transaction and return
+            const txBytes = new Uint8Array(request.payload as number[]);
+            const tx = VersionedTransaction.deserialize(txBytes);
+            // Add the Ledger signature
+            tx.addSignature(tx.message.staticAccountKeys[0], signature);
+            result = { signedTransaction: Array.from(tx.serialize()) };
+          } else if (request.type === 'ledger-sign-and-send') {
+            // Sign and send - apply signature and broadcast
+            const txBytes = new Uint8Array(request.payload as number[]);
+            const tx = VersionedTransaction.deserialize(txBytes);
+            tx.addSignature(tx.message.staticAccountKeys[0], signature);
+
+            const settings = await readSettings();
+            const config = getNetworkConfig(settings.selectedNetwork, settings.customNetworks);
+            const connection = new Connection(config.rpcUrl, 'confirmed');
+
+            const txSignature = await connection.sendRawTransaction(tx.serialize(), {
+              skipPreflight: (request as any).options?.skipPreflight || false,
+              preflightCommitment: 'confirmed',
+            });
+            result = { signature: txSignature };
+          } else if (request.type === 'ledger-sign-message') {
+            result = { signature: Array.from(signature) };
+          }
+
+          pendingRequests.delete(message.payload.requestId);
+          pendingResponders.delete(message.payload.requestId);
+          responder({ success: true, ...(result as object) });
+          sendResponse({ success: true });
+        } catch (e: any) {
+          console.error('[ledgerSignResult] Error:', e);
+          responder({ success: false, error: e.message });
+          sendResponse({ success: false, error: e.message });
+        }
         break;
       }
       case 'manaswap:getPermissions': {

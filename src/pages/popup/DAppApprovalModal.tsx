@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import type { PendingRequest } from '../../shared/types';
 import { sendMessage } from '../../shared/messaging';
 import { parseTransaction, shortenAddress, type ParsedTransaction, type ParsedInstruction } from '../../shared/txParser';
+import { LedgerSignModal } from './LedgerSignModal';
 
 interface DAppApprovalModalProps {
   request: PendingRequest;
@@ -313,10 +314,40 @@ export function DAppApprovalModal({ request, onApprove, onReject }: DAppApproval
         return 'Sign Message';
       case 'switch-chain':
         return 'Switch Network';
+      case 'ledger-sign-transaction':
+      case 'ledger-sign-and-send':
+        return 'Approve on Ledger';
+      case 'ledger-sign-message':
+        return 'Sign Message on Ledger';
       default:
         return 'Request';
     }
   };
+
+  // Handle Ledger signing requests - show Ledger modal
+  if (request.type === 'ledger-sign-transaction' || request.type === 'ledger-sign-and-send' || request.type === 'ledger-sign-message') {
+    const ledgerRequest = request as PendingRequest & { derivationPath: string };
+    return (
+      <LedgerSignModal
+        derivationPath={ledgerRequest.derivationPath}
+        payload={ledgerRequest.payload as number[]}
+        type={request.type === 'ledger-sign-message' ? 'message' : 'transaction'}
+        onSuccess={async (signature) => {
+          // Send the signature back to background to forward to dApp
+          const res = await sendMessage<{ success: boolean; error?: string }>({
+            type: 'manaswap:ledgerSignResult',
+            payload: { requestId: request.id, signature: Array.from(signature) },
+          });
+          if (res.success) {
+            onApprove();
+          }
+        }}
+        onCancel={() => {
+          onReject();
+        }}
+      />
+    );
+  }
 
   return (
     <div

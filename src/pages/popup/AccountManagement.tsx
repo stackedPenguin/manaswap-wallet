@@ -278,19 +278,30 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
         }
     };
 
-    const handleSelect = async (_account: any) => {
-        // For now, we just "import" it by adding it to the keyring as a derived account?
-        // Or we need a specific "addLedgerAccount" message.
-        // For MVP, let's just pretend we added it and refresh.
-        // In reality, we need to store the derivation path in the vault.
-        // I'll skip the storage part for now as it requires vault schema changes I might have missed.
-        // Wait, I added `ledgerAccounts` to `KeyringData` in `types.ts`!
-        // But I didn't add `addLedgerAccount` to `vault.ts` or `background.ts`.
-        // I should probably add that.
-        // For now, I'll just close and show success toast, but it won't persist.
-        // Let's add a TODO.
-        onSuccess();
-        onClose();
+    const handleSelect = async (account: { address: string; derivationPath: string }) => {
+        setIsLoading(true);
+        try {
+            // Add the Ledger account to the vault using addKeySource
+            const ledgerData = JSON.stringify({
+                accounts: [{ address: account.address, derivationPath: account.derivationPath }]
+            });
+
+            const res = await sendMessage<{ success: boolean; error?: string }>({
+                type: 'manaswap:addKeySource',
+                payload: { type: 'ledger', value: ledgerData, label: 'Ledger Account' }
+            });
+
+            if (res.success) {
+                onSuccess();
+                onClose();
+            } else {
+                setError(res.error || 'Failed to add Ledger account');
+            }
+        } catch (e: any) {
+            setError(e.message || 'Failed to add account');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (

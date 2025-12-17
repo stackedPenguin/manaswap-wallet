@@ -111,7 +111,11 @@ export type PendingRequest =
   | (PendingRequestBase & { type: 'sign-all-transactions'; payload: number[][] })
   | (PendingRequestBase & { type: 'sign-message'; payload: number[] })
   | (PendingRequestBase & { type: 'sign-and-send-transaction'; payload: number[]; options?: { skipPreflight?: boolean } })
-  | (PendingRequestBase & { type: 'switch-chain'; payload: { targetNetworkId: string; targetNetworkName: string } });
+  | (PendingRequestBase & { type: 'switch-chain'; payload: { targetNetworkId: string; targetNetworkName: string } })
+  // Ledger hardware wallet requests - handled by popup doing WebHID signing
+  | (PendingRequestBase & { type: 'ledger-sign-transaction'; payload: number[]; derivationPath: string })
+  | (PendingRequestBase & { type: 'ledger-sign-message'; payload: number[]; derivationPath: string })
+  | (PendingRequestBase & { type: 'ledger-sign-and-send'; payload: number[]; derivationPath: string; options?: { skipPreflight?: boolean } });
 
 // Re-export NetworkHealth for convenience
 export type { NetworkHealth } from './networks';
@@ -178,6 +182,8 @@ export type ManaswapMessage =
   | { type: 'manaswap:getTransactionHistory'; payload: { address: string; networkId: NetworkClusterId; limit?: number } }
   | { type: 'manaswap:executeSwap'; payload: { swapTransactionBase64: string } }
   | { type: 'manaswap:getPortfolioHistory'; payload: { address: string } }
+  // Ledger Messages
+  | { type: 'manaswap:ledgerSignResult'; payload: { requestId: string; signature: number[] } }
   // dApp Network Messages
   | { type: 'manaswap:dappGetNetwork'; payload: { origin: string } }
   | { type: 'manaswap:dappSwitchChain'; payload: { origin: string; networkId: string } };

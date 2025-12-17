@@ -54,3 +54,22 @@ export async function signTransactionLedger(derivationPath: string, transaction:
         }
     }
 }
+
+export async function signMessageLedger(derivationPath: string, message: Buffer): Promise<Buffer> {
+    let transport;
+    try {
+        transport = await TransportWebHID.create();
+        const solana = new Solana(transport);
+
+        // Use signOffchainMessage for message signing
+        const { signature } = await solana.signOffchainMessage(derivationPath, message);
+        return signature;
+    } catch (e) {
+        console.error("Ledger sign message error:", e);
+        throw e;
+    } finally {
+        if (transport) {
+            await transport.close();
+        }
+    }
+}
