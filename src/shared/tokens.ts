@@ -116,6 +116,14 @@ export async function fetchTokenMetadataMap(): Promise<Map<string, JupiterToken>
     }
 
     tokenMap = new Map(tokens.map(t => [t.address, t]));
+
+    // ALWAYS add fallback tokens to ensure custom tokens (like X1 USDC.X) are recognized
+    for (const fallback of FALLBACK_TOKENS) {
+        if (!tokenMap.has(fallback.address)) {
+            tokenMap.set(fallback.address, fallback);
+        }
+    }
+
     return tokenMap;
 }
 
