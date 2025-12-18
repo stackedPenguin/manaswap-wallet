@@ -47,6 +47,16 @@ export const FALLBACK_TOKENS: JupiterToken[] = [
         symbol: 'USDT',
         logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png',
         tags: []
+    },
+    // X1 Chain Tokens
+    {
+        address: 'B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq',
+        chainId: 195, // X1 mainnet chain ID
+        decimals: 6,
+        name: 'USDC.X',
+        symbol: 'USDC.X',
+        logoURI: '/tokens/usdc.png',
+        tags: ['x1']
     }
 ];
 
