@@ -44,6 +44,15 @@ export function App() {
           type: 'manaswap:getPendingRequests',
         });
         if (res.success && res.requests && res.requests.length > 0 && !pendingRequest) {
+          // Also ensure we have settings for the Blowfish simulation
+          if (!settings) {
+            const settingsRes = await sendMessage<{ success: boolean; settings?: WalletSettings }>({
+              type: 'manaswap:getSettings'
+            });
+            if (settingsRes.success && settingsRes.settings) {
+              setSettings(settingsRes.settings);
+            }
+          }
           setPendingRequest(res.requests[0]);
         }
       } catch (error) {
@@ -55,7 +64,7 @@ export function App() {
     const interval = setInterval(checkRequests, 2000);
 
     return () => clearInterval(interval);
-  }, [pendingRequest]);
+  }, [pendingRequest, settings]);
 
   if (isLoading) {
     return <div className="popup-shell"><div className="card">Checking wallet status...</div></div>;
