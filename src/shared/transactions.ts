@@ -1,4 +1,4 @@
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import {
   createAssociatedTokenAccountInstruction,
   createTransferInstruction,
@@ -8,6 +8,50 @@ import {
 } from '@solana/spl-token';
 import type { NetworkClusterId } from './networks';
 import { getNetworkConfig } from './networks';
+
+/**
+ * Send transaction and confirm using polling (no WebSocket - works in service workers)
+ */
+async function sendAndConfirmWithPolling(
+  connection: Connection,
+  transaction: Transaction,
+  signers: Keypair[]
+): Promise<string> {
+  // Sign the transaction
+  transaction.sign(...signers);
+
+  // Serialize and send
+  const rawTransaction = transaction.serialize();
+  const signature = await connection.sendRawTransaction(rawTransaction, {
+    skipPreflight: false,
+    preflightCommitment: 'confirmed',
+  });
+
+  console.log(`[Transaction] Sent: ${signature}`);
+
+  // Poll for confirmation instead of using WebSocket
+  const startTime = Date.now();
+  const timeout = 60000; // 60 second timeout
+
+  while (Date.now() - startTime < timeout) {
+    const status = await connection.getSignatureStatus(signature);
+
+    if (status?.value?.confirmationStatus === 'confirmed' ||
+      status?.value?.confirmationStatus === 'finalized') {
+      console.log(`[Transaction] Confirmed: ${signature}`);
+      return signature;
+    }
+
+    if (status?.value?.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+    }
+
+    // Wait 1 second before polling again
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  throw new Error('Transaction confirmation timeout');
+}
 
 /**
  * Sends SOL from one address to another
@@ -40,21 +84,8 @@ export async function sendSol(
   transaction.recentBlockhash = blockhash;
   transaction.feePayer = fromKeypair.publicKey;
 
-  // Sign transaction
-  transaction.sign(fromKeypair);
-
-  // Send and confirm transaction
-  const signature = await sendAndConfirmTransaction(
-    connection,
-    transaction,
-    [fromKeypair],
-    {
-      commitment: 'confirmed',
-      skipPreflight: false,
-    }
-  );
-
-  return signature;
+  // Send and confirm with polling (service worker compatible)
+  return sendAndConfirmWithPolling(connection, transaction, [fromKeypair]);
 }
 
 /**
@@ -102,6 +133,8 @@ export async function sendSplToken(
     programId
   );
 
+  console.log(`[sendSplToken] From ATA: ${fromAta.toBase58()}, To ATA: ${toAta.toBase58()}`);
+
   // Convert amount to raw token units
   const rawAmount = BigInt(Math.floor(amount * Math.pow(10, decimals)));
 
@@ -111,8 +144,10 @@ export async function sendSplToken(
   // Check if recipient's ATA exists, if not create it
   try {
     await getAccount(connection, toAta, 'confirmed', programId);
+    console.log(`[sendSplToken] Recipient ATA exists`);
   } catch (error) {
     if (error instanceof TokenAccountNotFoundError) {
+      console.log(`[sendSplToken] Creating recipient ATA`);
       // Create ATA for recipient using correct program ID
       transaction.add(
         createAssociatedTokenAccountInstruction(
@@ -145,21 +180,8 @@ export async function sendSplToken(
   transaction.recentBlockhash = blockhash;
   transaction.feePayer = fromKeypair.publicKey;
 
-  // Sign transaction
-  transaction.sign(fromKeypair);
-
-  // Send and confirm transaction
-  const signature = await sendAndConfirmTransaction(
-    connection,
-    transaction,
-    [fromKeypair],
-    {
-      commitment: 'confirmed',
-      skipPreflight: false,
-    }
-  );
-
-  return signature;
+  // Send and confirm with polling (service worker compatible)
+  return sendAndConfirmWithPolling(connection, transaction, [fromKeypair]);
 }
 
 /**
