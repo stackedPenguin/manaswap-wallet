@@ -12,6 +12,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [generatedMnemonic, setGeneratedMnemonic] = useState('');
   const [error, setError] = useState('');
   const [isBusy, setIsBusy] = useState(false);
+  const [backedUpConfirmed, setBackedUpConfirmed] = useState(false);
 
   // Handlers
   const handleStartCreate = () => {
@@ -330,8 +331,6 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
       </div>
     );
   }
-
-  const [backedUpConfirmed, setBackedUpConfirmed] = useState(false);
 
   if (step === 'backup-mnemonic') {
     return (
