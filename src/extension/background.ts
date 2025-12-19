@@ -508,7 +508,13 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       // Transaction Handlers
       case 'manaswap:sendTransaction': {
         try {
-          const keypair = getMainKeypair();
+          // Use the selected account, not the main keypair
+          const settings = await readSettings();
+          if (!settings.selectedAccountAddress) {
+            throw new Error('No account selected');
+          }
+
+          const keypair = getAccountKeypair(settings.selectedAccountAddress);
           const { recipient, amount, networkId, tokenMint, tokenDecimals } = message.payload;
 
           let signature: string;
@@ -516,6 +522,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           // Check if this is an SPL token transfer or native SOL
           if (tokenMint && tokenMint !== 'So11111111111111111111111111111111111111112') {
             // SPL token transfer
+            console.log(`[sendTransaction] Sending SPL token from ${keypair.publicKey.toBase58()}`);
             signature = await sendSplToken(
               keypair,
               recipient,
@@ -526,6 +533,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             );
           } else {
             // Native SOL transfer
+            console.log(`[sendTransaction] Sending native SOL from ${keypair.publicKey.toBase58()}`);
             signature = await sendSol(
               keypair,
               recipient,
