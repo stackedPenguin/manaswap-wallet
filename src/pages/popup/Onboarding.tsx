@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { sendMessage } from '../../shared/messaging';
 import { Icons } from '../../shared/ui';
 
@@ -8,11 +8,45 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState<FlowStep>('welcome');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [mnemonicInput, setMnemonicInput] = useState('');
   const [generatedMnemonic, setGeneratedMnemonic] = useState('');
   const [error, setError] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [backedUpConfirmed, setBackedUpConfirmed] = useState(false);
+  const [mnemonicLength, setMnemonicLength] = useState<12 | 24>(12);
+  const [mnemonicWords, setMnemonicWords] = useState<string[]>(Array(12).fill(''));
+
+  // Reset mnemonic words array when length changes
+  useEffect(() => {
+    setMnemonicWords(Array(mnemonicLength).fill(''));
+  }, [mnemonicLength]);
+
+  // Paste handler for word boxes
+  const handlePaste = (e: React.ClipboardEvent, index: number) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData('text');
+    const words = pastedData.trim().split(/\s+/);
+
+    if (words.length > 1) {
+      const newWords = [...mnemonicWords];
+      words.forEach((word, i) => {
+        if (index + i < newWords.length) {
+          newWords[index + i] = word;
+        }
+      });
+      setMnemonicWords(newWords);
+    } else {
+      const newWords = [...mnemonicWords];
+      newWords[index] = pastedData.trim();
+      setMnemonicWords(newWords);
+    }
+  };
+
+  // Word change handler
+  const handleWordChange = (index: number, value: string) => {
+    const newWords = [...mnemonicWords];
+    newWords[index] = value;
+    setMnemonicWords(newWords);
+  };
 
   // Handlers
   const handleStartCreate = () => {
@@ -77,9 +111,10 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
       setError('Passwords do not match');
       return;
     }
-    const cleanMnemonic = mnemonicInput.trim();
-    if (cleanMnemonic.split(' ').length < 12) {
-      setError('Invalid mnemonic phrase (too short)');
+    const cleanMnemonic = mnemonicWords.join(' ').trim();
+    const wordCount = cleanMnemonic.split(/\s+/).filter(w => w.length > 0).length;
+    if (wordCount !== mnemonicLength) {
+      setError(`Please enter all ${mnemonicLength} words`);
       return;
     }
 
@@ -445,12 +480,11 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   }
 
   if (step === 'import-mnemonic') {
-    const wordCount = mnemonicInput.trim().split(/\s+/).filter(w => w.length > 0).length;
-    const isValidLength = wordCount === 12 || wordCount === 24;
+    const filledWordCount = mnemonicWords.filter(w => w.trim().length > 0).length;
 
     return (
       <div style={{ padding: '24px', height: '100%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-        <div style={{ marginBottom: '24px' }}>
+        <div style={{ marginBottom: '16px' }}>
           <button
             onClick={() => setStep('welcome')}
             style={{
@@ -459,7 +493,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               color: 'var(--text-secondary)',
               cursor: 'pointer',
               padding: '8px',
-              marginBottom: '16px',
+              marginBottom: '12px',
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
@@ -475,47 +509,93 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         </div>
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', fontWeight: '500' }}>
-              Recovery Phrase
-            </label>
-            <textarea
-              placeholder="Enter your recovery phrase (12 or 24 words)"
-              className="mnemonic-input"
-              value={mnemonicInput}
-              onChange={(e) => {
-                setMnemonicInput(e.target.value);
-                setError('');
-              }}
+          {/* Word Length Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+            <button
+              onClick={() => setMnemonicLength(12)}
               style={{
-                width: '100%',
-                minHeight: '120px',
-                padding: '14px 16px',
-                background: 'var(--card-bg)',
-                border: error && error.includes('mnemonic') ? '2px solid var(--danger-color)' : '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: '12px',
-                color: 'var(--text-primary)',
-                fontSize: '0.95rem',
-                fontFamily: 'monospace',
-                resize: 'vertical',
-                lineHeight: '1.6',
+                padding: '6px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: mnemonicLength === 12 ? 'var(--text-primary)' : 'var(--card-bg)',
+                color: mnemonicLength === 12 ? 'black' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontWeight: '600',
+                fontSize: '0.85rem',
+                transition: 'all 0.2s',
               }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-              <p style={{
-                fontSize: '0.75rem',
-                color: wordCount > 0 && !isValidLength ? 'var(--warning-color)' : 'var(--text-muted)',
-                margin: 0,
-              }}>
-                {wordCount > 0 ? `${wordCount} words` : 'Enter your recovery phrase'}
-              </p>
-              {wordCount > 0 && !isValidLength && (
-                <p style={{ fontSize: '0.75rem', color: 'var(--warning-color)', margin: 0 }}>
-                  Must be 12 or 24 words
-                </p>
-              )}
-            </div>
+            >
+              12 Words
+            </button>
+            <button
+              onClick={() => setMnemonicLength(24)}
+              style={{
+                padding: '6px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: mnemonicLength === 24 ? 'var(--text-primary)' : 'var(--card-bg)',
+                color: mnemonicLength === 24 ? 'black' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontWeight: '600',
+                fontSize: '0.85rem',
+                transition: 'all 0.2s',
+              }}
+            >
+              24 Words
+            </button>
           </div>
+
+          {/* Word Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '8px',
+            maxHeight: mnemonicLength === 24 ? '240px' : 'auto',
+            overflowY: mnemonicLength === 24 ? 'auto' : 'visible',
+            paddingRight: mnemonicLength === 24 ? '4px' : '0'
+          }}>
+            {mnemonicWords.map((word, index) => (
+              <div key={index} style={{ position: 'relative' }}>
+                <span style={{
+                  position: 'absolute',
+                  left: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: '0.7rem',
+                  color: 'var(--text-secondary)',
+                  pointerEvents: 'none'
+                }}>
+                  {index + 1}.
+                </span>
+                <input
+                  type="text"
+                  value={word}
+                  onChange={(e) => handleWordChange(index, e.target.value)}
+                  onPaste={(e) => handlePaste(e, index)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 8px 10px 28px',
+                    fontSize: '0.85rem',
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--card-border)',
+                    borderRadius: '8px',
+                    color: 'var(--text-primary)',
+                    marginBottom: 0
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Word Count */}
+          <p style={{
+            fontSize: '0.75rem',
+            color: filledWordCount > 0 && filledWordCount < mnemonicLength ? 'var(--warning-color)' : 'var(--text-muted)',
+            margin: 0,
+            textAlign: 'center'
+          }}>
+            {filledWordCount > 0 ? `${filledWordCount} of ${mnemonicLength} words entered` : 'Paste your recovery phrase to auto-fill'}
+          </p>
 
           <div>
             <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', fontWeight: '500' }}>
@@ -580,7 +660,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
 
         <button
           onClick={handleImportVault}
-          disabled={isBusy || !isValidLength || !password || password !== confirm || password.length < 8}
+          disabled={isBusy || filledWordCount !== mnemonicLength || !password || password !== confirm || password.length < 8}
           className="btn-primary"
           style={{
             width: '100%',
