@@ -1049,6 +1049,7 @@ export function MainWallet() {
   if (selectedTokenForDetails) {
     return (
       <TokenDetails
+        key={`token-details-${selectedTokenForDetails.mint}`}
         token={selectedTokenForDetails}
         onBack={() => setSelectedTokenForDetails(null)}
         onSend={() => {
