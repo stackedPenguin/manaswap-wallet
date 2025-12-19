@@ -1,5 +1,6 @@
 import { registerWallet } from './register';
 import { ManaswapWalletImpl } from './walletStandard';
+import { PublicKey } from '@solana/web3.js';
 
 type ManaswapEventPayload = {
   provider: string;
@@ -8,7 +9,7 @@ type ManaswapEventPayload = {
 
 class ManaswapProvider extends EventTarget {
   public isConnected = false;
-  public publicKey: string | null = null;
+  public publicKey: PublicKey | null = null;
   public isManaswap = true;
   public isPhantom = false; // Compatibility check - we're not Phantom
 
@@ -59,13 +60,13 @@ class ManaswapProvider extends EventTarget {
     });
   }
 
-  async connect(): Promise<{ publicKey: string }> {
+  async connect(): Promise<{ publicKey: PublicKey }> {
     try {
       const result = await this.sendRequest('connect-request') as { publicKey: string };
       this.isConnected = true;
-      this.publicKey = result.publicKey;
-      this.dispatchEvent(new CustomEvent('connect', { detail: { publicKey: result.publicKey } }));
-      return result;
+      this.publicKey = new PublicKey(result.publicKey);
+      this.dispatchEvent(new CustomEvent('connect', { detail: { publicKey: this.publicKey } }));
+      return { publicKey: this.publicKey };
     } catch (error) {
       throw error;
     }
