@@ -26,6 +26,7 @@ import {
     type StandardEventsOnMethod,
 } from '@wallet-standard/features';
 import { SOLANA_MAINNET_CHAIN } from '@solana/wallet-standard-chains';
+import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 
 type IconString = `data:image/svg+xml;base64,${string}` | `data:image/webp;base64,${string}` | `data:image/png;base64,${string}` | `data:image/gif;base64,${string}`;
@@ -181,11 +182,18 @@ export class ManaswapWalletImpl implements ManaswapWallet {
         const results: SolanaSignAndSendTransactionOutput[] = [];
         for (const input of inputs) {
             try {
-                // Convert transaction bytes to array for provider
-                const txArray = Array.from(input.transaction);
+                const txBytes = input.transaction;
 
-                // Use the provider's signAndSendTransaction method
-                const result = await this._provider.signAndSendTransaction(txArray, input.options);
+                // Deserialize the transaction bytes into a proper Transaction object
+                let transaction: Transaction | VersionedTransaction;
+                try {
+                    transaction = VersionedTransaction.deserialize(txBytes);
+                } catch {
+                    transaction = Transaction.from(txBytes);
+                }
+
+                // Use the provider's signAndSendTransaction method with the deserialized transaction
+                const result = await this._provider.signAndSendTransaction(transaction, input.options);
 
                 // Result.signature is a base58 string, convert to bytes
                 const signatureBytes = bs58.decode(result.signature);
@@ -202,33 +210,33 @@ export class ManaswapWalletImpl implements ManaswapWallet {
 
         const results: SolanaSignTransactionOutput[] = [];
 
-        for (const tx of inputs) {
+        for (const input of inputs) {
             // Chain is optional in standard input, but if present should assume Mainnet for us?
-            // If undefined, standard says "use wallet's current chain" or similar.
-            // We only support mainnet.
-            if (tx.chain && tx.chain !== SOLANA_MAINNET_CHAIN) throw new Error('invalid chain');
+            if (input.chain && input.chain !== SOLANA_MAINNET_CHAIN) throw new Error('invalid chain');
 
-            const txArray = Array.from(tx.transaction);
+            const txBytes = input.transaction;
 
             try {
-                const signedTx = await this._provider.signTransaction(txArray);
-                // Provider returns object with transaction property or just transaction?
-                // signTransaction<T>(transaction: T): Promise<T>
-                // So if we pass array, we get array. Or VersionedTransaction object.
-                // If mocked, let's ensure we get bytes back.
-                // Assuming provider echoes back what we sent (if mocked) or returns signed bytes.
-                // We'll try to convert result to Uint8Array.
+                // Deserialize the transaction bytes into a proper Transaction object
+                // Try VersionedTransaction first, fall back to legacy Transaction
+                let transaction: Transaction | VersionedTransaction;
+                let isVersioned = false;
+                try {
+                    transaction = VersionedTransaction.deserialize(txBytes);
+                    isVersioned = true;
+                } catch {
+                    transaction = Transaction.from(txBytes);
+                }
 
+                // Call the provider with the deserialized transaction object
+                const signedTx = await this._provider.signTransaction(transaction);
+
+                // Serialize the signed transaction back to bytes
                 let signedTxBytes: Uint8Array;
-                if (signedTx instanceof Uint8Array || Array.isArray(signedTx)) {
-                    signedTxBytes = new Uint8Array(signedTx);
-                } else if (signedTx && typeof signedTx === 'object' && 'transaction' in signedTx) {
-                    // Handle case where result is wrapped
-                    // @ts-ignore
-                    signedTxBytes = new Uint8Array(signedTx.transaction);
+                if (isVersioned) {
+                    signedTxBytes = (signedTx as VersionedTransaction).serialize();
                 } else {
-                    // Fallback check logic
-                    signedTxBytes = new Uint8Array(tx.transaction); // Just echo if completely broken to avoid crash
+                    signedTxBytes = (signedTx as Transaction).serialize({ requireAllSignatures: false, verifySignatures: false });
                 }
 
                 results.push({ signedTransaction: signedTxBytes });
