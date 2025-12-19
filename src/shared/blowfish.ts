@@ -33,6 +33,19 @@ export interface BlowfishResult {
 }
 
 // RPC simulation response types
+interface TokenBalance {
+    accountIndex: number;
+    mint: string;
+    owner: string;
+    programId: string;
+    uiTokenAmount: {
+        amount: string;
+        decimals: number;
+        uiAmount: number;
+        uiAmountString: string;
+    };
+}
+
 interface SimulateTransactionResponse {
     jsonrpc: string;
     id: number;
@@ -49,6 +62,11 @@ interface SimulateTransactionResponse {
                 rentEpoch: number;
             }[];
             unitsConsumed?: number;
+            fee?: number;
+            preBalances?: number[];
+            postBalances?: number[];
+            preTokenBalances?: TokenBalance[];
+            postTokenBalances?: TokenBalance[];
         };
     };
     error?: {
@@ -181,9 +199,17 @@ export function useBlowfishEvaluation(
                 });
             } else {
                 // Transaction would succeed
-                // Parse logs to extract transfer information
-                const logs = data.result?.value?.logs || [];
-                const changes = parseLogsForBalanceChanges(logs, userAccount);
+                // Parse token balance changes
+                const preTokenBalances = data.result?.value?.preTokenBalances || [];
+                const postTokenBalances = data.result?.value?.postTokenBalances || [];
+                const fee = data.result?.value?.fee || 0;
+
+                const changes = parseTokenBalanceChanges(
+                    preTokenBalances,
+                    postTokenBalances,
+                    fee,
+                    userAccount
+                );
 
                 console.log('[Simulation] Parsed changes:', changes);
 
@@ -213,46 +239,84 @@ export function useBlowfishEvaluation(
     return { isLoading, error, evaluation };
 }
 
-// Parse transaction logs to extract balance change information
-function parseLogsForBalanceChanges(
-    logs: string[],
+// Known token mints for display names
+const TOKEN_NAMES: Record<string, { name: string; symbol: string }> = {
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': { name: 'USD Coin', symbol: 'USDC' },
+    'So11111111111111111111111111111111111111112': { name: 'Wrapped SOL', symbol: 'SOL' },
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': { name: 'Tether USD', symbol: 'USDT' },
+};
+
+// Parse token balance changes from simulation results
+function parseTokenBalanceChanges(
+    preTokenBalances: TokenBalance[],
+    postTokenBalances: TokenBalance[],
+    fee: number,
     userAccount: string
 ): BlowfishEvaluation['expectedStateChanges'] {
     const changes: BlowfishEvaluation['expectedStateChanges'] = {};
+    changes[userAccount] = [];
 
-    // Look for common patterns in logs
-    for (const log of logs) {
-        // SPL Token Transfer pattern
-        if (log.includes('Transfer') || log.includes('transfer')) {
-            // Extract amount if present
-            const amountMatch = log.match(/(\d+\.?\d*)/);
-            if (amountMatch) {
-                const amount = amountMatch[1];
-                if (!changes[userAccount]) {
-                    changes[userAccount] = [];
-                }
-                changes[userAccount].push({
-                    humanReadableDiff: `Transfer: ${amount}`,
+    // Build map of pre-balances by owner + mint
+    const preBalanceMap = new Map<string, TokenBalance>();
+    for (const bal of preTokenBalances) {
+        const key = `${bal.owner}-${bal.mint}`;
+        preBalanceMap.set(key, bal);
+    }
+
+    // Find changes by comparing with post-balances
+    const processedKeys = new Set<string>();
+
+    for (const postBal of postTokenBalances) {
+        const key = `${postBal.owner}-${postBal.mint}`;
+        processedKeys.add(key);
+
+        const preBal = preBalanceMap.get(key);
+        const preAmount = preBal?.uiTokenAmount.uiAmount || 0;
+        const postAmount = postBal.uiTokenAmount.uiAmount;
+        const diff = postAmount - preAmount;
+
+        // Only show changes for user's accounts or significant changes
+        if (postBal.owner === userAccount && Math.abs(diff) > 0.000001) {
+            const tokenInfo = TOKEN_NAMES[postBal.mint] || { name: 'Token', symbol: '???' };
+            const sign = diff > 0 ? '+' : '';
+            const formattedAmount = diff.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+
+            changes[userAccount]!.push({
+                humanReadableDiff: `${sign}${formattedAmount} ${tokenInfo.symbol}`,
+                suggestedColor: diff > 0 ? 'CREDIT' : 'DEBIT'
+            });
+        }
+    }
+
+    // Check for tokens that existed before but not after (fully spent)
+    for (const [key, preBal] of preBalanceMap) {
+        if (!processedKeys.has(key) && preBal.owner === userAccount) {
+            const tokenInfo = TOKEN_NAMES[preBal.mint] || { name: 'Token', symbol: '???' };
+            const amount = preBal.uiTokenAmount.uiAmount;
+            if (amount > 0.000001) {
+                changes[userAccount]!.push({
+                    humanReadableDiff: `-${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} ${tokenInfo.symbol}`,
                     suggestedColor: 'DEBIT'
                 });
             }
         }
-
-        // Program invoke patterns
-        if (log.includes('invoke [1]')) {
-            const programMatch = log.match(/Program (\w+) invoke/);
-            if (programMatch && !changes[userAccount]) {
-                changes[userAccount] = [];
-            }
-        }
     }
 
-    // If we couldn't parse specific changes, show a generic success message
-    if (Object.keys(changes).length === 0) {
-        changes[userAccount] = [{
+    // Add fee if significant
+    if (fee > 0) {
+        const solFee = fee / 1e9;
+        changes[userAccount]!.push({
+            humanReadableDiff: `Network fee: ${solFee.toFixed(6)} SOL`,
+            suggestedColor: 'DEBIT'
+        });
+    }
+
+    // Fallback if no specific changes found
+    if (changes[userAccount]!.length === 0) {
+        changes[userAccount]!.push({
             humanReadableDiff: 'Transaction simulated successfully',
             suggestedColor: 'NONE'
-        }];
+        });
     }
 
     return changes;
