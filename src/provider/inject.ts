@@ -53,6 +53,14 @@ class ManaswapProvider extends EventTarget {
           }
         }
       }
+
+      // Handle accountChanged notifications from background
+      if (event.data?.source === 'manaswap-content' && event.data?.type === 'accountChanged') {
+        const newPublicKey = event.data.publicKey ? new PublicKey(event.data.publicKey) : null;
+        this.publicKey = newPublicKey;
+        this.isConnected = !!newPublicKey;
+        this.dispatchEvent(new CustomEvent('accountChanged', { detail: newPublicKey }));
+      }
     });
   }
 
@@ -158,6 +166,44 @@ class ManaswapProvider extends EventTarget {
     try {
       const result = await this.sendRequest('sign-message', Array.from(message)) as { signature: number[] };
       return {
+        signature: new Uint8Array(result.signature),
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Sign In With Solana (SIWS) - for authentication
+  async signIn(input?: {
+    domain?: string;
+    address?: string;
+    statement?: string;
+    uri?: string;
+    version?: string;
+    chainId?: string;
+    nonce?: string;
+    issuedAt?: string;
+    expirationTime?: string;
+    notBefore?: string;
+    requestId?: string;
+    resources?: string[];
+  }): Promise<{
+    account: { address: string; publicKey: Uint8Array };
+    signedMessage: Uint8Array;
+    signature: Uint8Array;
+  }> {
+    try {
+      const result = await this.sendRequest('sign-in', input) as {
+        publicKey: string;
+        signedMessage: number[];
+        signature: number[];
+      };
+      return {
+        account: {
+          address: result.publicKey,
+          publicKey: new PublicKey(result.publicKey).toBytes(),
+        },
+        signedMessage: new Uint8Array(result.signedMessage),
         signature: new Uint8Array(result.signature),
       };
     } catch (error) {

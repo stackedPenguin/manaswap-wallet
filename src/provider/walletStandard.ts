@@ -7,12 +7,15 @@ import type {
     SolanaSignAndSendTransactionFeature,
     SolanaSignTransactionFeature,
     SolanaSignMessageFeature,
+    SolanaSignInFeature,
     SolanaSignTransactionInput,
     SolanaSignTransactionOutput,
     SolanaSignMessageInput,
     SolanaSignMessageOutput,
     SolanaSignAndSendTransactionInput,
     SolanaSignAndSendTransactionOutput,
+    SolanaSignInInput,
+    SolanaSignInOutput,
 } from '@solana/wallet-standard-features';
 import {
     StandardConnect,
@@ -36,6 +39,7 @@ export interface ManaswapWallet extends Wallet {
     features: SolanaSignAndSendTransactionFeature &
     SolanaSignTransactionFeature &
     SolanaSignMessageFeature &
+    SolanaSignInFeature &
     StandardConnectFeature &
     StandardDisconnectFeature &
     StandardEventsFeature;
@@ -73,7 +77,8 @@ export class ManaswapWalletImpl implements ManaswapWallet {
         StandardEventsFeature &
         SolanaSignTransactionFeature &
         SolanaSignAndSendTransactionFeature &
-        SolanaSignMessageFeature {
+        SolanaSignMessageFeature &
+        SolanaSignInFeature {
         return {
             [StandardConnect]: {
                 version: '1.0.0',
@@ -101,6 +106,10 @@ export class ManaswapWalletImpl implements ManaswapWallet {
                 version: '1.0.0',
                 signMessage: this._signMessage.bind(this),
             },
+            'solana:signIn': {
+                version: '1.0.0',
+                signIn: this._signIn.bind(this),
+            },
         };
     }
 
@@ -117,6 +126,15 @@ export class ManaswapWalletImpl implements ManaswapWallet {
 
         provider.addEventListener('connect', (e: CustomEvent) => {
             this._setAccount(e.detail.publicKey);
+        });
+
+        provider.addEventListener('accountChanged', (e: CustomEvent) => {
+            if (e.detail) {
+                this._setAccount(e.detail);
+            } else {
+                this._account = null;
+                this._emit('change', { accounts: this.accounts });
+            }
         });
         provider.addEventListener('disconnect', () => {
             this._setAccount(null);
@@ -305,6 +323,27 @@ export class ManaswapWalletImpl implements ManaswapWallet {
                 results.push({ signature, signedMessage: msg.message });
             } catch (e: any) {
                 throw new Error(e.message || 'Signing failed');
+            }
+        }
+
+        return results;
+    }
+
+    private async _signIn(...inputs: readonly (SolanaSignInInput | undefined)[]): Promise<readonly SolanaSignInOutput[]> {
+        if (!this._account) throw new Error('not connected');
+
+        const results: SolanaSignInOutput[] = [];
+
+        for (const input of inputs) {
+            try {
+                const result = await this._provider.signIn(input);
+                results.push({
+                    account: new ManaswapWalletAccount(result.account.address, result.account.publicKey),
+                    signedMessage: result.signedMessage,
+                    signature: result.signature,
+                });
+            } catch (e: any) {
+                throw new Error(e.message || 'Sign in failed');
             }
         }
 
