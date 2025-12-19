@@ -1,11 +1,32 @@
 import { registerWallet } from './register';
 import { ManaswapWalletImpl } from './walletStandard';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 type ManaswapEventPayload = {
   provider: string;
   version: string;
 };
+
+// Helper to serialize a transaction to bytes
+function serializeTransaction(tx: Transaction | VersionedTransaction): number[] {
+  if ('version' in tx && tx.version !== undefined) {
+    // VersionedTransaction
+    return Array.from((tx as VersionedTransaction).serialize());
+  } else {
+    // Legacy Transaction
+    return Array.from((tx as Transaction).serialize({ requireAllSignatures: false, verifySignatures: false }));
+  }
+}
+
+// Helper to deserialize bytes back to transaction
+function deserializeTransaction<T>(bytes: number[], isVersioned: boolean): T {
+  const buffer = Buffer.from(bytes);
+  if (isVersioned) {
+    return VersionedTransaction.deserialize(buffer) as unknown as T;
+  } else {
+    return Transaction.from(buffer) as unknown as T;
+  }
+}
 
 class ManaswapProvider extends EventTarget {
   public isConnected = false;
@@ -83,27 +104,36 @@ class ManaswapProvider extends EventTarget {
     }
   }
 
-  async signTransaction<T>(transaction: T): Promise<T> {
+  async signTransaction<T extends Transaction | VersionedTransaction>(transaction: T): Promise<T> {
     try {
-      const result = await this.sendRequest('sign-transaction', transaction) as T;
-      return result;
+      const isVersioned = 'version' in transaction && transaction.version !== undefined;
+      const txBytes = serializeTransaction(transaction);
+      const result = await this.sendRequest('sign-transaction', txBytes) as { transaction: number[] };
+      return deserializeTransaction<T>(result.transaction, isVersioned);
     } catch (error) {
       throw error;
     }
   }
 
-  async signAllTransactions<T>(transactions: T[]): Promise<T[]> {
+  async signAllTransactions<T extends Transaction | VersionedTransaction>(transactions: T[]): Promise<T[]> {
     try {
-      const result = await this.sendRequest('sign-all-transactions', transactions) as T[];
-      return result;
+      const serialized = transactions.map(tx => ({
+        bytes: serializeTransaction(tx),
+        isVersioned: 'version' in tx && tx.version !== undefined
+      }));
+      const result = await this.sendRequest('sign-all-transactions', serialized) as { transactions: number[][] };
+      return result.transactions.map((txBytes, i) =>
+        deserializeTransaction<T>(txBytes, serialized[i].isVersioned)
+      );
     } catch (error) {
       throw error;
     }
   }
 
-  async signAndSendTransaction<T>(transaction: T, options?: { skipPreflight?: boolean }): Promise<{ signature: string }> {
+  async signAndSendTransaction<T extends Transaction | VersionedTransaction>(transaction: T, options?: { skipPreflight?: boolean }): Promise<{ signature: string }> {
     try {
-      const result = await this.sendRequest('sign-and-send-transaction', { transaction, options }) as { signature: string };
+      const txBytes = serializeTransaction(transaction);
+      const result = await this.sendRequest('sign-and-send-transaction', { transaction: txBytes, options }) as { signature: string };
       return result;
     } catch (error) {
       throw error;
@@ -111,7 +141,7 @@ class ManaswapProvider extends EventTarget {
   }
 
   // Alias for signAndSendTransaction - some dApps use this
-  async send<T>(transaction: T, _signers?: unknown[], options?: { skipPreflight?: boolean }): Promise<string> {
+  async send<T extends Transaction | VersionedTransaction>(transaction: T, _signers?: unknown[], options?: { skipPreflight?: boolean }): Promise<string> {
     const result = await this.signAndSendTransaction(transaction, options);
     return result.signature;
   }
