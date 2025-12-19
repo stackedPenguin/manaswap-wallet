@@ -117,7 +117,14 @@ export function useBlowfishEvaluation(
     const [evaluation, setEvaluation] = useState<BlowfishEvaluation | undefined>(undefined);
 
     const fetchEvaluation = useCallback(async () => {
+        console.log('[Blowfish] fetchEvaluation called', {
+            hasTransaction: !!transactionBase64,
+            hasUserAccount: !!userAccount,
+            origin
+        });
+
         if (!transactionBase64 || !userAccount) {
+            console.log('[Blowfish] Missing required params, skipping');
             return;
         }
 
@@ -127,6 +134,11 @@ export function useBlowfishEvaluation(
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+            console.log('[Blowfish] Making API request...', {
+                txLength: transactionBase64.length,
+                userAccount: userAccount.slice(0, 8) + '...'
+            });
 
             const response = await fetch(`${BLOWFISH_API_URL}?language=en`, {
                 method: 'POST',
@@ -148,13 +160,19 @@ export function useBlowfishEvaluation(
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
+                console.error('[Blowfish] API error', response.status, errorData);
                 throw new Error(`Blowfish API error: ${response.status} ${JSON.stringify(errorData)}`);
             }
 
             const data: BlowfishRawResponse = await response.json();
+            console.log('[Blowfish] API response:', JSON.stringify(data, null, 2));
+
             const normalized = normalizeEvaluation(data);
+            console.log('[Blowfish] Normalized evaluation:', JSON.stringify(normalized, null, 2));
+
             setEvaluation(normalized);
         } catch (err) {
+            console.error('[Blowfish] Error:', err);
             if (err instanceof Error && err.name === 'AbortError') {
                 setError(new Error('Transaction simulation timed out'));
             } else {
