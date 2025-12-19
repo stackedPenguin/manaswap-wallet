@@ -102,6 +102,7 @@ interface PendingRequestBase {
   hostname: string;
   timestamp: number;
   icon?: string;
+  publicKey?: string; // User's wallet address for Blowfish simulation
 }
 
 // Discriminated union for pending requests with typed payloads

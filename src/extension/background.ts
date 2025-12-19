@@ -729,21 +729,26 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
 
           // Create pending request
           const requestId = `${message.type}-${Date.now()}-${Math.random()}`;
+
+          // Get selected account for Blowfish simulation
+          const settings = await readSettings();
+          const selectedAccountAddress = settings.selectedAccountAddress;
+
           let request: PendingRequest;
           const baseRequest = {
             id: requestId,
             origin,
             hostname: permission.hostname,
             timestamp: Date.now(),
+            publicKey: selectedAccountAddress, // For Blowfish simulation
           };
 
-          // Check if selected account is a Ledger account
-          const settings = await readSettings();
-          const accountInfo = settings.selectedAccountAddress ? getAccountInfo(settings.selectedAccountAddress) : null;
+          // Check if selected account is a Ledger account (settings already fetched above)
+          const accountInfo = selectedAccountAddress ? getAccountInfo(selectedAccountAddress) : null;
           const isLedgerAccount = accountInfo?.type === 'ledger';
           const derivationPath = accountInfo?.derivationPath || "44'/501'/0'";
 
-          console.log('[dappSign] Account type:', accountInfo?.type, 'isLedger:', isLedgerAccount);
+          console.log('[dappSign] Account type:', accountInfo?.type, 'isLedger:', isLedgerAccount, 'publicKey:', selectedAccountAddress);
 
           if (message.type === 'manaswap:dappSignTransaction') {
             const txPayload = (message.payload as { transaction: number[] }).transaction;

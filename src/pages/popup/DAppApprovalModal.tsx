@@ -418,8 +418,9 @@ export function DAppApprovalModal({ request, accountAddress, onApprove, onReject
   const [isProcessing, setIsProcessing] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
-  // Use accountAddress prop for Blowfish (from App.tsx's vaultState)
-  const userAccount = accountAddress || null;
+  // Use publicKey from request (set in background.ts) for Blowfish simulation
+  // This ensures the address is available immediately, avoiding race conditions
+  const userAccount = request.publicKey || accountAddress || null;
 
   // Convert transaction to base64 for Blowfish API
   const transactionBase64 = useMemo(() => {
