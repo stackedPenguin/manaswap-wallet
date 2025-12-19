@@ -81,9 +81,9 @@ class ManaswapProvider extends EventTarget {
     });
   }
 
-  async connect(): Promise<{ publicKey: PublicKey }> {
+  async connect(options?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: PublicKey }> {
     try {
-      const result = await this.sendRequest('connect-request') as { publicKey: string };
+      const result = await this.sendRequest('connect-request', options) as { publicKey: string };
       this.isConnected = true;
       this.publicKey = new PublicKey(result.publicKey);
       this.dispatchEvent(new CustomEvent('connect', { detail: { publicKey: this.publicKey } }));
@@ -130,7 +130,15 @@ class ManaswapProvider extends EventTarget {
     }
   }
 
-  async signAndSendTransaction<T extends Transaction | VersionedTransaction>(transaction: T, options?: { skipPreflight?: boolean }): Promise<{ signature: string }> {
+  async signAndSendTransaction<T extends Transaction | VersionedTransaction>(
+    transaction: T,
+    options?: {
+      skipPreflight?: boolean;
+      preflightCommitment?: 'processed' | 'confirmed' | 'finalized';
+      minContextSlot?: number;
+      maxRetries?: number;
+    }
+  ): Promise<{ signature: string }> {
     try {
       const txBytes = serializeTransaction(transaction);
       const result = await this.sendRequest('sign-and-send-transaction', { transaction: txBytes, options }) as { signature: string };

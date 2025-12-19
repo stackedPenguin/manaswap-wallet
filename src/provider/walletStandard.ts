@@ -181,6 +181,8 @@ export class ManaswapWalletImpl implements ManaswapWallet {
 
         const results: SolanaSignAndSendTransactionOutput[] = [];
         for (const input of inputs) {
+            // Account validation
+            if (input.account && input.account !== this._account) throw new Error('invalid account');
             try {
                 const txBytes = input.transaction;
 
@@ -210,15 +212,54 @@ export class ManaswapWalletImpl implements ManaswapWallet {
 
         const results: SolanaSignTransactionOutput[] = [];
 
-        for (const input of inputs) {
-            // Chain is optional in standard input, but if present should assume Mainnet for us?
+        // Batch optimization: use signAllTransactions when multiple inputs
+        if (inputs.length > 1) {
+            // Validate all accounts first
+            for (const input of inputs) {
+                if (input.account && input.account !== this._account) throw new Error('invalid account');
+                if (input.chain && input.chain !== SOLANA_MAINNET_CHAIN) throw new Error('invalid chain');
+            }
+
+            // Deserialize all transactions
+            const transactionData = inputs.map(input => {
+                const txBytes = input.transaction;
+                let transaction: Transaction | VersionedTransaction;
+                let isVersioned = false;
+                try {
+                    transaction = VersionedTransaction.deserialize(txBytes);
+                    isVersioned = true;
+                } catch {
+                    transaction = Transaction.from(txBytes);
+                }
+                return { transaction, isVersioned };
+            });
+
+            // Batch sign all transactions
+            const transactions = transactionData.map(d => d.transaction);
+            const signedTxs = await this._provider.signAllTransactions(transactions);
+
+            // Serialize all signed transactions
+            for (let i = 0; i < signedTxs.length; i++) {
+                const signedTx = signedTxs[i];
+                const { isVersioned } = transactionData[i];
+                let signedTxBytes: Uint8Array;
+                if (isVersioned) {
+                    signedTxBytes = (signedTx as VersionedTransaction).serialize();
+                } else {
+                    signedTxBytes = (signedTx as Transaction).serialize({ requireAllSignatures: false, verifySignatures: false });
+                }
+                results.push({ signedTransaction: signedTxBytes });
+            }
+        } else if (inputs.length === 1) {
+            const input = inputs[0];
+            // Account validation
+            if (input.account && input.account !== this._account) throw new Error('invalid account');
             if (input.chain && input.chain !== SOLANA_MAINNET_CHAIN) throw new Error('invalid chain');
 
             const txBytes = input.transaction;
 
             try {
                 // Deserialize the transaction bytes into a proper Transaction object
-                // Try VersionedTransaction first, fall back to legacy Transaction
                 let transaction: Transaction | VersionedTransaction;
                 let isVersioned = false;
                 try {
@@ -254,6 +295,8 @@ export class ManaswapWalletImpl implements ManaswapWallet {
         const results: SolanaSignMessageOutput[] = [];
 
         for (const msg of inputs) {
+            // Account validation
+            if (msg.account && msg.account !== this._account) throw new Error('invalid account');
             const msgArray = Array.from(msg.message);
             try {
                 const result = await this._provider.signMessage(msgArray);
