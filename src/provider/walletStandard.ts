@@ -122,9 +122,13 @@ export class ManaswapWalletImpl implements ManaswapWallet {
         });
     }
 
-    private _setAccount(publicKeyStr: string | null) {
-        if (publicKeyStr) {
+    private _setAccount(publicKeyInput: string | { toBase58: () => string; toBuffer: () => Buffer } | null) {
+        if (publicKeyInput) {
             try {
+                // Handle both string and PublicKey object
+                const publicKeyStr = typeof publicKeyInput === 'string'
+                    ? publicKeyInput
+                    : publicKeyInput.toBase58();
                 const publicKeyBytes = bs58.decode(publicKeyStr);
                 this._account = new ManaswapWalletAccount(publicKeyStr, publicKeyBytes);
                 // Standard doesn't have explicit 'change' event in interface but strictly speaking we should emit it strictly?
