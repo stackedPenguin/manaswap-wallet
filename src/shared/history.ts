@@ -24,6 +24,74 @@ interface HeliusEnhancedTransaction {
     transactionError?: any;
 }
 
+// RPC-based transaction history for non-Helius chains (X1, testnet, etc.)
+async function fetchRpcBasedHistory(
+    connection: Connection,
+    address: string,
+    networkId: NetworkClusterId,
+    limit: number
+): Promise<TransactionActivity[]> {
+    try {
+        const { PublicKey } = await import('@solana/web3.js');
+        const pubkey = new PublicKey(address);
+
+        // Get confirmed signatures
+        const signatures = await connection.getSignaturesForAddress(pubkey, { limit });
+
+        const activities: TransactionActivity[] = [];
+
+        for (const sig of signatures) {
+            try {
+                const tx = await connection.getTransaction(sig.signature, {
+                    maxSupportedTransactionVersion: 0
+                });
+
+                if (!tx || !tx.meta) continue;
+
+                // Check if this is a SOL transfer
+                const preBalances = tx.meta.preBalances;
+                const postBalances = tx.meta.postBalances;
+
+                // Get account keys from versioned or legacy transaction
+                const accountKeys = 'staticAccountKeys' in tx.transaction.message
+                    ? tx.transaction.message.staticAccountKeys.map(k => k.toBase58())
+                    : (tx.transaction.message as any).accountKeys?.map((k: any) => k.toBase58()) || [];
+
+                const userIndex = accountKeys.indexOf(address);
+
+                if (userIndex !== -1 && preBalances && postBalances) {
+                    const preBal = preBalances[userIndex] || 0;
+                    const postBal = postBalances[userIndex] || 0;
+                    const diff = (postBal - preBal) / 1_000_000_000;
+
+                    // Skip dust transactions
+                    if (Math.abs(diff) < 0.001) continue;
+
+                    activities.push({
+                        id: sig.signature,
+                        type: diff > 0 ? 'receive' : 'send',
+                        signature: sig.signature,
+                        from: diff < 0 ? address : 'Unknown',
+                        to: diff > 0 ? address : 'Unknown',
+                        amount: Math.abs(diff),
+                        networkId,
+                        timestamp: (sig.blockTime || 0) * 1000,
+                        status: sig.err ? 'failed' : 'confirmed'
+                    });
+                }
+            } catch (e) {
+                // Skip failed transaction parsing
+                continue;
+            }
+        }
+
+        return activities;
+    } catch (error) {
+        console.error('Failed to fetch RPC-based history:', error);
+        return [];
+    }
+}
+
 export async function fetchTransactionHistory(
     _connection: Connection,
     address: string,
@@ -31,15 +99,32 @@ export async function fetchTransactionHistory(
     limit: number = 50
 ): Promise<TransactionActivity[]> {
     try {
+        // Helius API is only available for Solana networks
+        // For X1 or other chains, we need to use RPC-based history
+        const isSolanaNetwork = networkId.startsWith('solana-');
+
+        if (!isSolanaNetwork) {
+            // For X1 and other non-Solana networks, use RPC-based approach
+            return await fetchRpcBasedHistory(_connection, address, networkId, limit);
+        }
+
         // Extract API Key from RPC URL
-        // VITE_SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=...
         const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || '';
         const apiKeyMatch = rpcUrl.match(/api-key=([^&]+)/);
 
         if (apiKeyMatch && apiKeyMatch[1]) {
             const apiKey = apiKeyMatch[1];
-            // Use Helius Enhanced API
-            const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions?api-key=${apiKey}`;
+
+            // Determine correct Helius API endpoint based on network
+            let heliusBase = 'https://api-mainnet.helius-rpc.com';
+            if (networkId === 'solana-devnet') {
+                heliusBase = 'https://api-devnet.helius-rpc.com';
+            } else if (networkId === 'solana-testnet') {
+                // Helius doesn't support testnet, fallback to RPC
+                return await fetchRpcBasedHistory(_connection, address, networkId, limit);
+            }
+
+            const url = `${heliusBase}/v0/addresses/${address}/transactions?api-key=${apiKey}`;
 
             const response = await fetch(url);
             if (!response.ok) {
@@ -134,10 +219,9 @@ export async function fetchTransactionHistory(
                 .slice(0, limit);
         }
 
-        // Fallback to standard RPC if no API key found (shouldn't happen with Helius setup)
-        console.warn('No Helius API key found, falling back to standard RPC');
-        // ... (We could keep the old logic here as fallback, but for now let's assume Helius works)
-        return [];
+        // Fallback to RPC-based approach if no Helius API key found
+        console.warn('No Helius API key found, falling back to RPC-based history');
+        return await fetchRpcBasedHistory(_connection, address, networkId, limit);
 
     } catch (error) {
         console.error('Failed to fetch transaction history:', error);

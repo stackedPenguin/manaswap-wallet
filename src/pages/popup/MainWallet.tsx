@@ -1140,8 +1140,22 @@ export function MainWallet() {
                   <div
                     key={acc.address}
                     onClick={async () => {
+                      // Clear current balances immediately for visual feedback
+                      setBalances(new Map());
+                      setPortfolioHistory([]);
+
                       setSelectedAccount(acc);
                       setShowAccountsMenu(false);
+
+                      // Load cached portfolio history for this account
+                      import('../../shared/portfolio').then(({ getPortfolioHistory }) => {
+                        getPortfolioHistory(acc.address).then((cached: PortfolioDataPoint[]) => {
+                          if (cached.length > 0) {
+                            setPortfolioHistory(cached);
+                          }
+                        });
+                      });
+
                       // Persist selection
                       const newSettings = { ...settings, selectedAccountAddress: acc.address };
                       setSettings(newSettings);
