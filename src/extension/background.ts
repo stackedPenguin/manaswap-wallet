@@ -4,7 +4,7 @@ import type { DAppPermission, ManaswapMessage, Notification, PendingRequest, Sit
 import { fetchAccountBalance } from '../shared/balances';
 import { fetchTokenPrices } from '../shared/prices';
 import { fetchTransactionHistory } from '../shared/history';
-import { sendSol } from '../shared/transactions';
+import { sendSol, sendSplToken } from '../shared/transactions';
 import {
   createVault,
   addAccount,
@@ -508,20 +508,35 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       // Transaction Handlers
       case 'manaswap:sendTransaction': {
         try {
-          // TODO: Support sending from specific account. For now, we need to find the account that matches the sender?
-          // The message payload doesn't have sender address currently. 
-          // We should update the message type or assume active account.
-          // For now, let's assume we use the first account or we need to update sendTransaction to accept sender.
-          // Let's default to first account for now to keep it working, but ideally we pass sender.
           const keypair = getMainKeypair();
-          const signature = await sendSol(
-            keypair,
-            message.payload.recipient,
-            message.payload.amount,
-            message.payload.networkId
-          );
+          const { recipient, amount, networkId, tokenMint, tokenDecimals } = message.payload;
+
+          let signature: string;
+
+          // Check if this is an SPL token transfer or native SOL
+          if (tokenMint && tokenMint !== 'So11111111111111111111111111111111111111112') {
+            // SPL token transfer
+            signature = await sendSplToken(
+              keypair,
+              recipient,
+              amount,
+              tokenMint,
+              tokenDecimals || 9, // Default to 9 decimals if not provided
+              networkId
+            );
+          } else {
+            // Native SOL transfer
+            signature = await sendSol(
+              keypair,
+              recipient,
+              amount,
+              networkId
+            );
+          }
+
           sendResponse({ success: true, signature });
         } catch (e: any) {
+          console.error('[Background] sendTransaction failed:', e);
           sendResponse({ success: false, error: e.message });
         }
         break;
