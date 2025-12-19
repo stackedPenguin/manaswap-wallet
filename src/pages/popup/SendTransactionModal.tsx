@@ -138,7 +138,7 @@ export function SendTransactionModal({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        backgroundColor: 'rgba(0, 0, 0, 0.95)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -151,11 +151,14 @@ export function SendTransactionModal({
         style={{
           maxWidth: '360px',
           width: '100%',
-          background: 'var(--card-bg)',
+          background: '#1a1a2e',
           borderRadius: '16px',
           padding: '20px',
           maxHeight: '90vh',
           overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column' as const,
+          minHeight: '400px',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -313,7 +316,7 @@ export function SendTransactionModal({
                 style={{
                   flex: 1,
                   padding: '12px',
-                  background: 'linear-gradient(135deg, #9945ff, #14f195)',
+                  background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
                   border: 'none',
                   borderRadius: '10px',
                   color: '#fff',
@@ -344,7 +347,7 @@ export function SendTransactionModal({
                   height: '48px',
                   borderRadius: '50%',
                   margin: '0 auto 12px',
-                  background: 'linear-gradient(135deg, #9945ff, #14f195)',
+                  background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -414,7 +417,7 @@ export function SendTransactionModal({
                 style={{
                   flex: 1,
                   padding: '12px',
-                  background: 'linear-gradient(135deg, #9945ff, #14f195)',
+                  background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
                   border: 'none',
                   borderRadius: '10px',
                   color: '#fff',
