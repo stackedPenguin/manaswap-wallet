@@ -3,6 +3,152 @@ import type { PendingRequest } from '../../shared/types';
 import { sendMessage } from '../../shared/messaging';
 import { parseTransaction, shortenAddress, type ParsedTransaction, type ParsedInstruction } from '../../shared/txParser';
 import { LedgerSignModal } from './LedgerSignModal';
+import { useBlowfishEvaluation, transactionBytesToBase64, type BlowfishEvaluation } from '../../shared/blowfish';
+
+// Blowfish balance changes display component
+function BalanceChanges({ evaluation, isLoading, error }: {
+  evaluation?: BlowfishEvaluation;
+  isLoading: boolean;
+  error: Error | null;
+}) {
+  if (isLoading) {
+    return (
+      <div style={{
+        background: 'var(--bg-secondary)',
+        borderRadius: '12px',
+        padding: '16px',
+        marginBottom: '12px',
+        border: '1px solid var(--card-border)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
+          <div className="loading-spinner" style={{ width: '16px', height: '16px' }} />
+          <span>Simulating transaction...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{
+        background: 'rgba(255, 180, 0, 0.1)',
+        borderRadius: '12px',
+        padding: '12px 16px',
+        marginBottom: '12px',
+        border: '1px solid rgba(255, 180, 0, 0.3)',
+        color: '#ffb400',
+        fontSize: '0.85rem',
+      }}>
+        ⚠️ Simulation unavailable - proceed with caution
+      </div>
+    );
+  }
+
+  if (!evaluation) return null;
+
+  const hasChanges = evaluation.expectedStateChanges &&
+    Object.keys(evaluation.expectedStateChanges).length > 0;
+
+  return (
+    <div style={{ marginBottom: '12px' }}>
+      {/* Security warnings */}
+      {(evaluation.warnings.length > 0 || evaluation.errors.length > 0) && (
+        <div style={{ marginBottom: '12px' }}>
+          {evaluation.warnings.map((warning, i) => (
+            <div key={i} style={{
+              background: warning.severity === 'CRITICAL'
+                ? 'rgba(239, 68, 68, 0.15)'
+                : 'rgba(255, 180, 0, 0.1)',
+              borderRadius: '8px',
+              padding: '12px',
+              marginBottom: '8px',
+              border: `1px solid ${warning.severity === 'CRITICAL'
+                ? 'rgba(239, 68, 68, 0.4)'
+                : 'rgba(255, 180, 0, 0.3)'}`,
+              color: warning.severity === 'CRITICAL' ? '#ef4444' : '#ffb400',
+              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '8px',
+            }}>
+              <span>{warning.severity === 'CRITICAL' ? '🚨' : '⚠️'}</span>
+              <span>{warning.message}</span>
+            </div>
+          ))}
+          {evaluation.errors.map((err, i) => (
+            <div key={`err-${i}`} style={{
+              background: 'rgba(239, 68, 68, 0.15)',
+              borderRadius: '8px',
+              padding: '12px',
+              marginBottom: '8px',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              color: '#ef4444',
+              fontSize: '0.85rem',
+            }}>
+              ❌ {err}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Balance changes */}
+      {hasChanges && (
+        <div style={{
+          background: 'var(--bg-secondary)',
+          borderRadius: '12px',
+          padding: '16px',
+          border: '1px solid var(--card-border)',
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '0.9rem' }}>
+            Expected Balance Changes
+          </div>
+          {Object.entries(evaluation.expectedStateChanges!).map(([account, changes]) => (
+            <div key={account} style={{ marginBottom: '8px' }}>
+              {changes.map((change, i) => (
+                <div key={i} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 0',
+                  borderBottom: i < changes.length - 1 ? '1px solid var(--card-border)' : 'none',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {change.asset?.imageUrl && (
+                      <img
+                        src={change.asset.imageUrl}
+                        alt={change.asset.name}
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          borderRadius: change.asset.isNonFungible ? '4px' : '50%',
+                        }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                    <span style={{ fontSize: '0.9rem' }}>
+                      {change.asset?.name || 'Unknown Asset'}
+                    </span>
+                  </div>
+                  <span style={{
+                    color: change.suggestedColor === 'DEBIT' ? '#ef4444' :
+                      change.suggestedColor === 'CREDIT' ? '#22c55e' :
+                        'var(--text-primary)',
+                    fontWeight: 500,
+                    fontSize: '0.9rem',
+                  }}>
+                    {change.humanReadableDiff}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface DAppApprovalModalProps {
   request: PendingRequest;
@@ -271,6 +417,34 @@ export function DAppApprovalModal({ request, onApprove, onReject }: DAppApproval
   const [isProcessing, setIsProcessing] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
+  // Extract user account from request context
+  const userAccount = (request as { publicKey?: string }).publicKey || null;
+
+  // Convert transaction to base64 for Blowfish API
+  const transactionBase64 = useMemo(() => {
+    if (request.type !== 'sign-transaction' && request.type !== 'sign-and-send-transaction') {
+      return null;
+    }
+    try {
+      const payload = request.payload;
+      if (Array.isArray(payload)) {
+        return transactionBytesToBase64(payload);
+      } else if (payload && typeof payload === 'object') {
+        const p = payload as Record<string, unknown>;
+        if (Array.isArray(p.transaction)) {
+          return transactionBytesToBase64(p.transaction);
+        }
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }, [request]);
+
+  // Blowfish simulation hook
+  const { isLoading: blowfishLoading, error: blowfishError, evaluation } =
+    useBlowfishEvaluation(transactionBase64, userAccount, request.origin);
+
   const handleApprove = async () => {
     setIsProcessing(true);
     try {
@@ -508,7 +682,14 @@ export function DAppApprovalModal({ request, onApprove, onReject }: DAppApproval
               </div>
             </div>
 
-            {/* Balance changes notice */}
+            {/* Blowfish simulation results */}
+            <BalanceChanges
+              evaluation={evaluation}
+              isLoading={blowfishLoading}
+              error={blowfishError}
+            />
+
+            {/* Balance changes disclaimer */}
             <div style={{
               fontSize: '0.8rem',
               color: 'var(--text-secondary)',
