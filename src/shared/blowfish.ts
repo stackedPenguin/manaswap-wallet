@@ -67,7 +67,8 @@ export interface BlowfishResult {
     evaluation?: BlowfishEvaluation;
 }
 
-const BLOWFISH_API_URL = 'https://api.blowfish.xyz/solana/v0/mainnet/scan/transactions';
+// Use Backpack's Blowfish proxy (public access without API key)
+const BLOWFISH_API_URL = 'https://blowfish.xnftdata.com/solana/v0/mainnet/scan/transactions';
 const REQUEST_TIMEOUT = 10000;
 
 function normalizeEvaluation(response: BlowfishRawResponse): BlowfishEvaluation {
