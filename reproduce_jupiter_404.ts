@@ -1,7 +1,7 @@
 
 const JUPITER_PRICE_API_V2_URL = 'https://api.jup.ag/price/v2';
 const IDS = 'So11111111111111111111111111111111111111112'; // SOL
-const API_KEY = process.env.VITE_JUPITER_ULTRA_API_KEY || 'b945aeb3-0e3a-4359-b42d-04160b69a3d5'; // Hardcoded for test
+const API_KEY = process.env.VITE_JUPITER_ULTRA_API_KEY || ''; // Set via environment variable
 
 async function testJupiterV2() {
     const url = `${JUPITER_PRICE_API_V2_URL}?ids=${IDS}`; // Removed vsToken
