@@ -1,9 +1,9 @@
-// Blowfish transaction simulation hook for Solana
-// Based on Backpack's implementation
+// Transaction simulation using Helius/Solana RPC simulateTransaction
+// Replaces Blowfish (which requires API key) with Helius RPC
 
 import { useState, useEffect, useCallback } from 'react';
 
-// Blowfish API response types
+// Simulation result types (compatible with existing UI)
 export interface BlowfishEvaluation {
     action: 'BLOCK' | 'WARN' | 'NONE';
     warnings: {
@@ -26,86 +26,67 @@ export interface BlowfishEvaluation {
     };
 }
 
-interface BlowfishRawResponse {
-    aggregated: {
-        action: 'BLOCK' | 'WARN' | 'NONE';
-        warnings: {
-            severity: 'WARNING' | 'CRITICAL';
-            kind: string;
-            message: string;
-        }[];
-        error?: {
-            humanReadableError: string;
-        };
-        expectedStateChanges?: {
-            [account: string]: {
-                humanReadableDiff: string;
-                suggestedColor: 'DEBIT' | 'CREDIT' | 'NONE';
-                rawInfo: {
-                    data: {
-                        asset?: {
-                            imageUrl?: string;
-                            name?: string;
-                            symbol?: string;
-                            metaplexTokenStandard?: string;
-                        };
-                    };
-                };
-            }[];
-        };
-    };
-    perTransaction: {
-        error?: {
-            humanReadableError: string;
-        };
-    }[];
-}
-
 export interface BlowfishResult {
     isLoading: boolean;
     error: Error | null;
     evaluation?: BlowfishEvaluation;
 }
 
-// Use Backpack's Blowfish proxy (public access without API key)
-const BLOWFISH_API_URL = 'https://blowfish.xnftdata.com/solana/v0/mainnet/scan/transactions';
+// RPC simulation response types
+interface SimulateTransactionResponse {
+    jsonrpc: string;
+    id: number;
+    result?: {
+        context: { slot: number };
+        value: {
+            err: null | object;
+            logs: string[];
+            accounts?: {
+                lamports: number;
+                owner: string;
+                data: string[];
+                executable: boolean;
+                rentEpoch: number;
+            }[];
+            unitsConsumed?: number;
+        };
+    };
+    error?: {
+        code: number;
+        message: string;
+    };
+}
+
 const REQUEST_TIMEOUT = 10000;
 
-function normalizeEvaluation(response: BlowfishRawResponse): BlowfishEvaluation {
-    const simulationError = response.aggregated.error?.humanReadableError;
+// Get Helius RPC URL from stored settings or env
+async function getHeliusRpcUrl(): Promise<string | null> {
+    try {
+        // First try Vite env variable
+        const apiKey = (import.meta as any)?.env?.VITE_HELIUS_API_KEY;
+        if (apiKey) {
+            console.log('[Simulation] Using VITE_HELIUS_API_KEY from env');
+            return `https://mainnet.helius-rpc.com/?api-key=${apiKey}`;
+        }
 
-    return {
-        action: response.aggregated.action,
-        warnings: response.aggregated.warnings || [],
-        errors: [
-            ...(simulationError ? [simulationError] : []),
-            ...response.perTransaction
-                .map((tx) => tx.error?.humanReadableError)
-                .filter((err): err is string => Boolean(err)),
-        ],
-        expectedStateChanges: response.aggregated.expectedStateChanges
-            ? Object.fromEntries(
-                Object.entries(response.aggregated.expectedStateChanges).map(
-                    ([address, changes]) => [
-                        address,
-                        changes.map((change) => ({
-                            humanReadableDiff: change.humanReadableDiff,
-                            suggestedColor: change.suggestedColor,
-                            asset: change.rawInfo?.data?.asset?.imageUrl
-                                ? {
-                                    isNonFungible:
-                                        change.rawInfo.data.asset.metaplexTokenStandard?.includes('non_fungible') || false,
-                                    imageUrl: change.rawInfo.data.asset.imageUrl,
-                                    name: change.rawInfo.data.asset.name || 'Unknown',
-                                    symbol: change.rawInfo.data.asset.symbol,
-                                }
-                                : undefined,
-                        })),
-                    ]
-                )
-            )
-            : undefined,
-    };
+        // Fallback: Try to get from settings (customNetworks)
+        const result = await chrome.storage.local.get('manaswap:settings');
+        const settings = result['manaswap:settings'] as Record<string, unknown> | undefined;
+
+        if (settings?.customNetworks && Array.isArray(settings.customNetworks)) {
+            for (const network of settings.customNetworks as { rpcUrl?: string }[]) {
+                if (network.rpcUrl?.includes('helius')) {
+                    console.log('[Simulation] Found Helius RPC in customNetworks');
+                    return network.rpcUrl;
+                }
+            }
+        }
+
+        return null;
+    } catch (e) {
+        console.error('[Simulation] Failed to get Helius RPC URL:', e);
+        return null;
+    }
 }
 
 export function useBlowfishEvaluation(
@@ -118,14 +99,14 @@ export function useBlowfishEvaluation(
     const [evaluation, setEvaluation] = useState<BlowfishEvaluation | undefined>(undefined);
 
     const fetchEvaluation = useCallback(async () => {
-        console.log('[Blowfish] fetchEvaluation called', {
+        console.log('[Simulation] fetchEvaluation called', {
             hasTransaction: !!transactionBase64,
             hasUserAccount: !!userAccount,
             origin
         });
 
         if (!transactionBase64 || !userAccount) {
-            console.log('[Blowfish] Missing required params, skipping');
+            console.log('[Simulation] Missing required params, skipping');
             return;
         }
 
@@ -133,26 +114,39 @@ export function useBlowfishEvaluation(
         setError(null);
 
         try {
+            const rpcUrl = await getHeliusRpcUrl();
+
+            if (!rpcUrl) {
+                throw new Error('Helius API key not configured. Add VITE_HELIUS_API_KEY to .env');
+            }
+
+            console.log('[Simulation] Using RPC:', rpcUrl.substring(0, 50) + '...');
+
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
-            console.log('[Blowfish] Making API request...', {
-                txLength: transactionBase64.length,
-                userAccount: userAccount.slice(0, 8) + '...'
-            });
-
-            const response = await fetch(`${BLOWFISH_API_URL}?language=en`, {
+            // Call simulateTransaction RPC
+            const response = await fetch(rpcUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-API-VERSION': '2023-06-05',
                 },
                 body: JSON.stringify({
-                    transactions: [transactionBase64],
-                    userAccount,
-                    metadata: {
-                        origin: origin || 'unknown',
-                    },
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'simulateTransaction',
+                    params: [
+                        transactionBase64,
+                        {
+                            encoding: 'base64',
+                            commitment: 'confirmed',
+                            replaceRecentBlockhash: true,
+                            accounts: {
+                                encoding: 'base64',
+                                addresses: [userAccount]
+                            }
+                        }
+                    ]
                 }),
                 signal: controller.signal,
             });
@@ -160,20 +154,48 @@ export function useBlowfishEvaluation(
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('[Blowfish] API error', response.status, errorData);
-                throw new Error(`Blowfish API error: ${response.status} ${JSON.stringify(errorData)}`);
+                throw new Error(`RPC error: ${response.status}`);
             }
 
-            const data: BlowfishRawResponse = await response.json();
-            console.log('[Blowfish] API response:', JSON.stringify(data, null, 2));
+            const data: SimulateTransactionResponse = await response.json();
+            console.log('[Simulation] RPC response:', JSON.stringify(data, null, 2));
 
-            const normalized = normalizeEvaluation(data);
-            console.log('[Blowfish] Normalized evaluation:', JSON.stringify(normalized, null, 2));
+            if (data.error) {
+                throw new Error(`Simulation failed: ${data.error.message}`);
+            }
 
-            setEvaluation(normalized);
+            if (data.result?.value?.err) {
+                // Transaction would fail
+                const errStr = JSON.stringify(data.result.value.err);
+                console.log('[Simulation] Transaction would fail:', errStr);
+
+                setEvaluation({
+                    action: 'WARN',
+                    warnings: [{
+                        severity: 'WARNING',
+                        kind: 'TRANSACTION_ERROR',
+                        message: `Transaction may fail: ${errStr}`
+                    }],
+                    errors: [errStr],
+                    expectedStateChanges: undefined
+                });
+            } else {
+                // Transaction would succeed
+                // Parse logs to extract transfer information
+                const logs = data.result?.value?.logs || [];
+                const changes = parseLogsForBalanceChanges(logs, userAccount);
+
+                console.log('[Simulation] Parsed changes:', changes);
+
+                setEvaluation({
+                    action: 'NONE',
+                    warnings: [],
+                    errors: [],
+                    expectedStateChanges: changes
+                });
+            }
         } catch (err) {
-            console.error('[Blowfish] Error:', err);
+            console.error('[Simulation] Error:', err);
             if (err instanceof Error && err.name === 'AbortError') {
                 setError(new Error('Transaction simulation timed out'));
             } else {
@@ -191,7 +213,52 @@ export function useBlowfishEvaluation(
     return { isLoading, error, evaluation };
 }
 
-// Convert transaction bytes to base64 for Blowfish API
+// Parse transaction logs to extract balance change information
+function parseLogsForBalanceChanges(
+    logs: string[],
+    userAccount: string
+): BlowfishEvaluation['expectedStateChanges'] {
+    const changes: BlowfishEvaluation['expectedStateChanges'] = {};
+
+    // Look for common patterns in logs
+    for (const log of logs) {
+        // SPL Token Transfer pattern
+        if (log.includes('Transfer') || log.includes('transfer')) {
+            // Extract amount if present
+            const amountMatch = log.match(/(\d+\.?\d*)/);
+            if (amountMatch) {
+                const amount = amountMatch[1];
+                if (!changes[userAccount]) {
+                    changes[userAccount] = [];
+                }
+                changes[userAccount].push({
+                    humanReadableDiff: `Transfer: ${amount}`,
+                    suggestedColor: 'DEBIT'
+                });
+            }
+        }
+
+        // Program invoke patterns
+        if (log.includes('invoke [1]')) {
+            const programMatch = log.match(/Program (\w+) invoke/);
+            if (programMatch && !changes[userAccount]) {
+                changes[userAccount] = [];
+            }
+        }
+    }
+
+    // If we couldn't parse specific changes, show a generic success message
+    if (Object.keys(changes).length === 0) {
+        changes[userAccount] = [{
+            humanReadableDiff: 'Transaction simulated successfully',
+            suggestedColor: 'NONE'
+        }];
+    }
+
+    return changes;
+}
+
+// Convert transaction bytes to base64
 export function transactionBytesToBase64(txBytes: number[] | Uint8Array): string {
     const bytes = txBytes instanceof Uint8Array ? txBytes : new Uint8Array(txBytes);
     let binary = '';
