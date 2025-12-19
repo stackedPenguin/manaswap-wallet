@@ -769,7 +769,7 @@ export function MainWallet() {
 
         tooltip.style.display = 'block';
         tooltip.innerHTML = `
-                <div style="font-weight: bold;">${currency} ${price.toFixed(2)}</div>
+                <div style="font-weight: bold;">$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                 <div style="color: var(--text-secondary);">${dateStr}</div>
             `;
 

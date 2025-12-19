@@ -196,6 +196,14 @@ export async function calculateHistoricalPortfolio(
     // At T_now, holdings are currentHoldings.
     // To go to T_prev, we REVERSE the transactions that happened between T_prev and T_now.
 
+    // CRITICAL FIX: Find the earliest transaction timestamp
+    // If a wallet was empty before, we should show $0 for times before the first transaction
+    const earliestTransactionTime = balanceChanges.length > 0
+        ? Math.min(...balanceChanges.map(c => c.timestamp))
+        : Date.now(); // If no balance changes, assume wallet just started now
+
+    console.log(`[PortfolioDebug] Earliest transaction time: ${new Date(earliestTransactionTime).toISOString()}`);
+
     let holdings = new Map(currentHoldings);
     let lastTime = Date.now();
 
@@ -218,6 +226,15 @@ export async function calculateHistoricalPortfolio(
             holdings.set(mint, newAmount);
             // console.log(`[PortfolioDebug] Reverted ${change.amount} of ${mint}. New Balance: ${newAmount}`);
         });
+
+        // CRITICAL FIX: If this timestamp is BEFORE the earliest transaction, 
+        // the wallet was empty - show $0
+        if (time < earliestTransactionTime) {
+            portfolioHistory.push({ timestamp: time, value: 0 });
+            console.log(`[PortfolioDebug] Time: ${new Date(time).toISOString()} | Value: $0.00 (before first transaction)`);
+            lastTime = time;
+            continue;
+        }
 
         // 2. Calculate Value at 'time'
         let totalValue = 0;
