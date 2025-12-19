@@ -152,6 +152,7 @@ function BalanceChanges({ evaluation, isLoading, error }: {
 
 interface DAppApprovalModalProps {
   request: PendingRequest;
+  accountAddress?: string | null;
   onApprove: () => void;
   onReject: () => void;
 }
@@ -413,12 +414,12 @@ function SignAllTransactionsDetails({ request }: { request: PendingRequest }): R
   );
 }
 
-export function DAppApprovalModal({ request, onApprove, onReject }: DAppApprovalModalProps) {
+export function DAppApprovalModal({ request, accountAddress, onApprove, onReject }: DAppApprovalModalProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
-  // Extract user account from request context
-  const userAccount = (request as { publicKey?: string }).publicKey || null;
+  // Use accountAddress prop for Blowfish (from App.tsx's vaultState)
+  const userAccount = accountAddress || null;
 
   // Convert transaction to base64 for Blowfish API
   const transactionBase64 = useMemo(() => {

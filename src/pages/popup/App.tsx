@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { sendMessage } from '../../shared/messaging';
-import type { PendingRequest, VaultState } from '../../shared/types';
+import type { PendingRequest, VaultState, WalletSettings } from '../../shared/types';
 import { MainWallet } from './MainWallet';
 import { Onboarding } from './Onboarding';
 import { Unlock } from './Unlock';
@@ -9,6 +9,7 @@ import './index.css';
 
 export function App() {
   const [vaultState, setVaultState] = useState<VaultState | null>(null);
+  const [settings, setSettings] = useState<WalletSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingRequest, setPendingRequest] = useState<PendingRequest | null>(null);
 
@@ -16,6 +17,16 @@ export function App() {
     try {
       const state = await sendMessage<VaultState>({ type: 'manaswap:getVaultState' });
       setVaultState(state);
+
+      // Also fetch settings to get selected account
+      if (state?.isInitialized && !state?.isLocked) {
+        const settingsRes = await sendMessage<{ success: boolean; settings?: WalletSettings }>({
+          type: 'manaswap:getSettings'
+        });
+        if (settingsRes.success && settingsRes.settings) {
+          setSettings(settingsRes.settings);
+        }
+      }
     } catch (e) {
       console.error("Failed to get vault state", e);
     } finally {
@@ -25,7 +36,7 @@ export function App() {
 
   useEffect(() => {
     checkState();
-    
+
     // Check for pending dApp requests
     const checkRequests = async () => {
       try {
@@ -39,10 +50,10 @@ export function App() {
         console.error('[Manaswap] Failed to check pending requests', error);
       }
     };
-    
+
     checkRequests();
     const interval = setInterval(checkRequests, 2000);
-    
+
     return () => clearInterval(interval);
   }, [pendingRequest]);
 
@@ -72,6 +83,7 @@ export function App() {
       {pendingRequest && (
         <DAppApprovalModal
           request={pendingRequest}
+          accountAddress={settings?.selectedAccountAddress || null}
           onApprove={() => {
             setPendingRequest(null);
             // Refresh state to show updated permissions
