@@ -58,7 +58,7 @@ export async function sendSol(
 }
 
 /**
- * Sends SPL tokens from one address to another
+ * Sends SPL tokens (both SPL Token and Token-2022) from one address to another
  */
 export async function sendSplToken(
   fromKeypair: Keypair,
@@ -74,9 +74,33 @@ export async function sendSplToken(
   const mintPubkey = new PublicKey(tokenMint);
   const toPublicKey = new PublicKey(toAddress);
 
-  // Get Associated Token Addresses
-  const fromAta = await getAssociatedTokenAddress(mintPubkey, fromKeypair.publicKey);
-  const toAta = await getAssociatedTokenAddress(mintPubkey, toPublicKey);
+  // Detect which token program this mint uses (SPL Token vs Token-2022)
+  const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
+  if (!mintAccountInfo) {
+    throw new Error('Mint account not found');
+  }
+
+  // Token-2022 program ID: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
+  // SPL Token program ID: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+  const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+  const programId = mintAccountInfo.owner;
+  const isToken2022 = programId.equals(TOKEN_2022_PROGRAM_ID);
+
+  console.log(`[sendSplToken] Mint: ${tokenMint}, Program: ${programId.toBase58()}, isToken2022: ${isToken2022}`);
+
+  // Get Associated Token Addresses using the correct program ID
+  const fromAta = await getAssociatedTokenAddress(
+    mintPubkey,
+    fromKeypair.publicKey,
+    false, // allowOwnerOffCurve
+    programId // Use detected program ID
+  );
+  const toAta = await getAssociatedTokenAddress(
+    mintPubkey,
+    toPublicKey,
+    false,
+    programId
+  );
 
   // Convert amount to raw token units
   const rawAmount = BigInt(Math.floor(amount * Math.pow(10, decimals)));
@@ -86,16 +110,17 @@ export async function sendSplToken(
 
   // Check if recipient's ATA exists, if not create it
   try {
-    await getAccount(connection, toAta);
+    await getAccount(connection, toAta, 'confirmed', programId);
   } catch (error) {
     if (error instanceof TokenAccountNotFoundError) {
-      // Create ATA for recipient
+      // Create ATA for recipient using correct program ID
       transaction.add(
         createAssociatedTokenAccountInstruction(
           fromKeypair.publicKey, // payer
           toAta, // ata address
           toPublicKey, // owner
-          mintPubkey // mint
+          mintPubkey, // mint
+          programId // Use detected program ID
         )
       );
     } else {
@@ -103,13 +128,15 @@ export async function sendSplToken(
     }
   }
 
-  // Add transfer instruction
+  // Add transfer instruction with correct program ID
   transaction.add(
     createTransferInstruction(
       fromAta, // source
       toAta, // destination
       fromKeypair.publicKey, // owner
-      rawAmount // amount
+      rawAmount, // amount
+      [], // multiSigners
+      programId // Use detected program ID
     )
   );
 
