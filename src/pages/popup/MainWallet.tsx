@@ -331,6 +331,7 @@ export function MainWallet() {
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
 
   const [showSendModal, setShowSendModal] = useState(false);
+  const [tokenToSend, setTokenToSend] = useState<UnifiedTokenBalance | null>(null);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [showNetworkModal, setShowNetworkModal] = useState(false);
@@ -1053,6 +1054,8 @@ export function MainWallet() {
         token={selectedTokenForDetails}
         onBack={() => setSelectedTokenForDetails(null)}
         onSend={() => {
+          // Capture the token before clearing selection
+          setTokenToSend(selectedTokenForDetails);
           setSelectedTokenForDetails(null);
           setShowSendModal(true);
         }}
@@ -1460,10 +1463,23 @@ export function MainWallet() {
         <SendTransactionModal
           accountAddress={selectedAccount.address}
           networkId={settings.selectedNetwork}
-          balance={balances.get(settings.selectedNetwork)?.solBalance || 0}
-          onClose={() => setShowSendModal(false)}
+          balance={tokenToSend
+            ? Number(tokenToSend.amount) / Math.pow(10, tokenToSend.decimals)
+            : (balances.get(settings.selectedNetwork)?.solBalance || 0)}
+          token={tokenToSend ? {
+            mint: tokenToSend.mint,
+            symbol: tokenToSend.symbol || 'Unknown',
+            name: tokenToSend.name || 'Unknown Token',
+            logoURI: tokenToSend.logoURI,
+            decimals: tokenToSend.decimals,
+          } : undefined}
+          onClose={() => {
+            setShowSendModal(false);
+            setTokenToSend(null);
+          }}
           onSuccess={(signature?: string) => {
             loadAllBalances();
+            setTokenToSend(null);
             setToast({ message: 'Transaction sent!', type: 'success' });
 
             setActivityLog((prev) => {

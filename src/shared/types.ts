@@ -165,7 +165,7 @@ export type ManaswapMessage =
   | { type: 'manaswap:getBalance'; payload: { address: string; networkId: NetworkClusterId } }
   | { type: 'manaswap:refreshBalance'; payload: { address: string; networkId: NetworkClusterId } }
   // Transaction Messages
-  | { type: 'manaswap:sendTransaction'; payload: { recipient: string; amount: number; networkId: NetworkClusterId } }
+  | { type: 'manaswap:sendTransaction'; payload: { recipient: string; amount: number; networkId: NetworkClusterId; tokenMint?: string; tokenDecimals?: number } }
   // dApp Messages
   | { type: 'manaswap:dappConnect'; payload: { origin: string; hostname: string; icon?: string } }
   | { type: 'manaswap:dappDisconnect'; payload: { origin: string } }

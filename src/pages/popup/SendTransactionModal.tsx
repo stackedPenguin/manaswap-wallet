@@ -4,10 +4,19 @@ import { NETWORKS } from '../../shared/networks';
 import { sendMessage } from '../../shared/messaging';
 import { Icons } from '../../shared/ui';
 
+interface TokenInfo {
+  mint: string;
+  symbol: string;
+  name: string;
+  logoURI?: string;
+  decimals: number;
+}
+
 interface SendTransactionModalProps {
   accountAddress?: string;
   networkId: NetworkClusterId;
   balance: number;
+  token?: TokenInfo;  // Optional: if provided, sending SPL token; otherwise native SOL/X1
   onClose: () => void;
   onSuccess?: (signature?: string) => void;
 }
@@ -21,6 +30,7 @@ interface TransactionResponse {
 export function SendTransactionModal({
   networkId,
   balance,
+  token,
   onClose,
   onSuccess,
 }: SendTransactionModalProps) {
@@ -32,7 +42,8 @@ export function SendTransactionModal({
   const [showReview, setShowReview] = useState(false);
 
   const network = NETWORKS.find((n) => n.id === networkId);
-  const currency = network?.kind === 'x1' ? 'X1' : 'SOL';
+  // Use token symbol if sending SPL token, otherwise native currency
+  const currency = token?.symbol || (network?.kind === 'x1' ? 'XNT' : 'SOL');
 
   // Validate recipient address
   const isValidAddress = (addr: string): boolean => {
@@ -56,7 +67,7 @@ export function SendTransactionModal({
 
   const handleContinue = () => {
     setError('');
-    
+
     // Validation
     if (!recipient || !isValidAddress(recipient)) {
       setError('Invalid recipient address');
@@ -89,6 +100,9 @@ export function SendTransactionModal({
           recipient,
           amount: amountNum,
           networkId,
+          // Include token info for SPL token transfers
+          tokenMint: token?.mint,
+          tokenDecimals: token?.decimals,
         },
       });
 
@@ -358,22 +372,40 @@ export function SendTransactionModal({
               borderRadius: '16px',
               border: '1px solid rgba(59, 130, 246, 0.2)',
             }}>
-              <div className="logo" style={{
-                width: '64px',
-                height: '64px',
-                fontSize: '24px',
-                margin: '0 auto 16px',
-                background: network?.kind === 'x1'
-                  ? 'linear-gradient(135deg, #06b6d4, #0891b2)'
-                  : 'linear-gradient(135deg, #9945ff, #14f195)',
-              }}>
-                {network?.kind === 'x1' ? 'X1' : 'SOL'}
-              </div>
-              <div style={{ fontSize: '1.5rem', fontWeight: '700', marginBottom: '4px' }}>
+              {/* Token logo */}
+              {token?.logoURI ? (
+                <img
+                  src={token.logoURI}
+                  alt={token.symbol}
+                  style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '50%',
+                    margin: '0 auto 16px',
+                    objectFit: 'cover',
+                  }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div className="logo" style={{
+                  width: '64px',
+                  height: '64px',
+                  fontSize: '24px',
+                  margin: '0 auto 16px',
+                  background: network?.kind === 'x1'
+                    ? 'linear-gradient(135deg, #06b6d4, #0891b2)'
+                    : 'linear-gradient(135deg, #9945ff, #14f195)',
+                }}>
+                  {currency.slice(0, 3)}
+                </div>
+              )}
+              <div style={{ fontSize: '1.5rem', fontWeight: '700', marginBottom: '4px', color: 'var(--text-primary)' }}>
                 {parseFloat(amount).toFixed(6)} {currency}
               </div>
               <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                ≈ ${(parseFloat(amount) * 150).toFixed(2)}
+                {token?.name || (network?.kind === 'x1' ? 'X1 Native Token' : 'Solana')}
               </div>
             </div>
 
