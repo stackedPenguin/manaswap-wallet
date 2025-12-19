@@ -83,6 +83,7 @@ import {
   RefreshCw,
   Copy,
   Check,
+  CheckCircle,
   AlertTriangle,
   X,
   Clock,
@@ -96,7 +97,8 @@ import {
   Layers,
   Eye,
   EyeOff,
-  Globe
+  Globe,
+  ExternalLink
 } from 'lucide-react';
 
 // Icon Components
@@ -125,5 +127,7 @@ export const Icons = {
   Eye: (props: any) => <Eye size={16} {...props} />,
   EyeOff: (props: any) => <EyeOff size={16} {...props} />,
   Network: (props: any) => <Globe size={16} {...props} />,
+  CheckCircle: (props: any) => <CheckCircle size={14} {...props} />,
+  ExternalLink: (props: any) => <ExternalLink size={14} {...props} />,
 };
 

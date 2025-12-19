@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, type ISeriesApi, CandlestickSeries, AreaSeries } from 'lightweight-charts';
 import { Icons, Skeleton } from '../../shared/ui';
 import { fetchTokenOHLC, fetchTokenMarketData, type OHLCData, type TokenMarketData } from '../../shared/tokenHistory';
+import { NETWORKS } from '../../shared/networks';
 import type { UnifiedTokenBalance } from './MainWallet';
 
 interface TokenDetailsProps {
@@ -10,6 +11,31 @@ interface TokenDetailsProps {
     onSend: () => void;
     onReceive: () => void;
     onSwap: () => void;
+}
+
+// Helper to get explorer URL for a mint address
+function getExplorerAddressUrl(token: UnifiedTokenBalance): string {
+    // X1 networks use their own explorer
+    if (token.networkKind === 'x1') {
+        if (token.networkId === 'x1-mainnet') {
+            return `https://explorer.mainnet.x1.xyz/address/${token.mint}`;
+        } else if (token.networkId === 'x1-testnet') {
+            return `https://explorer.testnet.x1.xyz/address/${token.mint}`;
+        }
+        return `https://explorer.mainnet.x1.xyz/address/${token.mint}`;
+    }
+
+    // Solana networks
+    const network = NETWORKS.find(n => n.id === token.networkId);
+    if (network) {
+        // Use Solscan for Solana tokens
+        const hasCluster = network.environment !== 'mainnet';
+        const clusterParam = hasCluster ? `?cluster=${network.environment}` : '';
+        return `https://solscan.io/token/${token.mint}${clusterParam}`;
+    }
+
+    // Fallback to Solscan
+    return `https://solscan.io/token/${token.mint}`;
 }
 
 export function TokenDetails({ token, onBack, onSend, onReceive, onSwap }: TokenDetailsProps) {
@@ -36,6 +62,7 @@ export function TokenDetails({ token, onBack, onSend, onReceive, onSwap }: Token
     const [ohlcData, setOhlcData] = useState<OHLCData[]>([]);
     const [marketData, setMarketData] = useState<TokenMarketData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [mintCopied, setMintCopied] = useState(false);
 
     // Fetch Data
     useEffect(() => {
@@ -327,6 +354,65 @@ export function TokenDetails({ token, onBack, onSend, onReceive, onSwap }: Token
                         <div style={{ fontSize: '0.8rem', marginTop: '4px' }}>Hardcoded price (no market data available)</div>
                     </div>
                 )}
+
+                {/* Mint Address */}
+                <div style={{ background: 'var(--card-bg)', padding: '16px', borderRadius: '16px', border: '1px solid var(--card-border)', marginBottom: '16px' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>Mint Address</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                            flex: 1,
+                            fontFamily: 'monospace',
+                            fontSize: '0.75rem',
+                            color: 'var(--text-primary)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                        }}>
+                            {token.mint}
+                        </div>
+                        <button
+                            onClick={() => {
+                                navigator.clipboard.writeText(token.mint);
+                                setMintCopied(true);
+                                setTimeout(() => setMintCopied(false), 2000);
+                            }}
+                            style={{
+                                background: mintCopied ? 'var(--success-color)' : 'var(--bg-secondary)',
+                                border: 'none',
+                                padding: '6px 10px',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                color: mintCopied ? 'white' : 'var(--text-secondary)',
+                                fontSize: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            {mintCopied ? <Icons.CheckCircle size={14} /> : <Icons.Copy size={14} />}
+                            {mintCopied ? 'Copied!' : 'Copy'}
+                        </button>
+                        <button
+                            onClick={() => window.open(getExplorerAddressUrl(token), '_blank')}
+                            style={{
+                                background: 'var(--bg-secondary)',
+                                border: 'none',
+                                padding: '6px 10px',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                color: 'var(--text-secondary)',
+                                fontSize: '0.75rem'
+                            }}
+                        >
+                            <Icons.ExternalLink size={14} />
+                            Explorer
+                        </button>
+                    </div>
+                </div>
 
                 {/* Your Balance */}
                 <div style={{ background: 'var(--card-bg)', padding: '16px', borderRadius: '16px', border: '1px solid var(--card-border)', marginBottom: '24px' }}>
