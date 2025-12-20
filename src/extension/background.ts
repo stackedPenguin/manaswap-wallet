@@ -23,7 +23,7 @@ import {
   getAccountInfo,
   setAccountLabel
 } from './vault';
-import { Connection, VersionedTransaction, Transaction } from '@solana/web3.js';
+import { Connection, VersionedTransaction, Transaction, Keypair } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 import { getLedgerAccounts } from './ledger';
 import { savePortfolioDataPoint } from '../shared/portfolio';
@@ -545,6 +545,50 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           sendResponse({ success: true, signature });
         } catch (e: any) {
           console.error('[Background] sendTransaction failed:', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:signAndSendRawTransaction': {
+        try {
+          const { transaction: txBytes, accountAddress, networkId, additionalSigners } = message.payload;
+
+          // Get keypair for the specified account
+          const keypair = getAccountKeypair(accountAddress);
+
+          // Deserialize the transaction
+          const transaction = Transaction.from(Buffer.from(txBytes));
+
+          // Build signers array (wallet + any additional signers like stake account)
+          const signers: Keypair[] = [keypair];
+          if (additionalSigners) {
+            for (const signerBytes of additionalSigners) {
+              const additionalKeypair = Keypair.fromSecretKey(new Uint8Array(signerBytes));
+              signers.push(additionalKeypair);
+            }
+          }
+
+          // Sign the transaction
+          transaction.sign(...signers);
+
+          // Get network config and send
+          const settings = await readSettings();
+          const config = getNetworkConfig(networkId, settings.customNetworks);
+          const connection = new Connection(config.rpcUrl, 'confirmed');
+
+          // Send and confirm
+          const signature = await connection.sendRawTransaction(transaction.serialize(), {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          });
+
+          // Wait for confirmation
+          await connection.confirmTransaction(signature, 'confirmed');
+
+          console.log('[Background] Raw transaction sent:', signature);
+          sendResponse({ success: true, signature });
+        } catch (e: any) {
+          console.error('[Background] signAndSendRawTransaction failed:', e);
           sendResponse({ success: false, error: e.message });
         }
         break;

@@ -167,6 +167,14 @@ export type ManaswapMessage =
   | { type: 'manaswap:refreshBalance'; payload: { address: string; networkId: NetworkClusterId } }
   // Transaction Messages
   | { type: 'manaswap:sendTransaction'; payload: { recipient: string; amount: number; networkId: NetworkClusterId; tokenMint?: string; tokenDecimals?: number } }
+  | {
+    type: 'manaswap:signAndSendRawTransaction'; payload: {
+      transaction: number[]; // Serialized transaction bytes
+      accountAddress: string;
+      networkId: NetworkClusterId;
+      additionalSigners?: number[][]; // Array of secret key bytes for additional signers (e.g., stake account keypair)
+    }
+  }
   // dApp Messages
   | { type: 'manaswap:dappConnect'; payload: { origin: string; hostname: string; icon?: string } }
   | { type: 'manaswap:dappDisconnect'; payload: { origin: string } }

@@ -11,6 +11,7 @@ import { AccountManagement, AccountDetailsModal, LedgerConnectModal } from './Ac
 import { SendTransactionModal } from './SendTransactionModal';
 import { ReceiveModal } from './ReceiveModal';
 import { SwapModal } from './SwapModal';
+import { StakingModal } from './StakingModal';
 import { TokenDetails } from './TokenDetails';
 import { DefiPositions } from './DefiPositions';
 import { Skeleton, Icons } from '../../shared/ui';
@@ -334,6 +335,7 @@ export function MainWallet() {
   const [tokenToSend, setTokenToSend] = useState<UnifiedTokenBalance | null>(null);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [showSwapModal, setShowSwapModal] = useState(false);
+  const [showStakingModal, setShowStakingModal] = useState(false);
   const [showNetworkModal, setShowNetworkModal] = useState(false);
   const [view, setView] = useState<'home' | 'history' | 'defi'>('home');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -1333,6 +1335,12 @@ export function MainWallet() {
               <div className="action-button-icon"><Icons.Swap /></div>
               <div className="action-button-label">Swap</div>
             </div>
+            {selectedNetwork?.kind === 'x1' && (
+              <div className="action-button" onClick={() => setShowStakingModal(true)} title="Stake XNT">
+                <div className="action-button-icon"><Icons.Stake /></div>
+                <div className="action-button-label">Stake</div>
+              </div>
+            )}
           </div>
 
           {/* My Assets Section */}
@@ -1619,6 +1627,33 @@ export function MainWallet() {
               return [entry, ...prev].slice(0, activityBufferSize);
             });
           }}
+        />
+      )}
+
+      {showStakingModal && selectedAccount && selectedNetwork?.kind === 'x1' && (
+        <StakingModal
+          isOpen={showStakingModal}
+          onClose={() => setShowStakingModal(false)}
+          walletAddress={selectedAccount.address}
+          networkId={selectedNetwork.id}
+          xntBalance={balances.get(selectedNetwork.id)?.solBalance || 0}
+          onSignTransaction={async (transaction, additionalSigners) => {
+            // Sign and send transaction through background
+            const result = await sendMessage<{ success: boolean; signature?: string; error?: string }>({
+              type: 'manaswap:signAndSendRawTransaction',
+              payload: {
+                transaction: Array.from(transaction.serialize({ requireAllSignatures: false })),
+                accountAddress: selectedAccount.address,
+                networkId: selectedNetwork.id,
+                additionalSigners: additionalSigners?.map(k => Array.from(k.secretKey)),
+              }
+            });
+            if (!result.success) {
+              throw new Error(result.error || 'Transaction failed');
+            }
+            return result.signature || '';
+          }}
+          showToast={(message, type) => setToast({ message, type })}
         />
       )}
 

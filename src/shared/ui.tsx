@@ -98,7 +98,8 @@ import {
   Eye,
   EyeOff,
   Globe,
-  ExternalLink
+  ExternalLink,
+  Coins
 } from 'lucide-react';
 
 // Icon Components
@@ -129,5 +130,6 @@ export const Icons = {
   Network: (props: any) => <Globe size={16} {...props} />,
   CheckCircle: (props: any) => <CheckCircle size={14} {...props} />,
   ExternalLink: (props: any) => <ExternalLink size={14} {...props} />,
+  Stake: (props: any) => <Coins size={20} {...props} />,
 };
 
