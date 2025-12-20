@@ -236,6 +236,45 @@ export interface BalanceChange {
     signature: string;
 }
 
+// Cache for known transaction signatures to avoid re-fetching
+const TX_CACHE_PREFIX = 'tx_cache:';
+const TX_CACHE_MAX_AGE = 1000 * 60 * 5; // 5 minutes freshness
+
+async function getCachedTxData(address: string, networkId: string): Promise<{ signatures: Set<string>; changes: BalanceChange[] }> {
+    try {
+        const key = `${TX_CACHE_PREFIX}${address}:${networkId}`;
+        const result = await chrome.storage.local.get(key);
+        const cache = result[key] as { signatures: string[]; changes: BalanceChange[]; lastUpdated: number } | undefined;
+
+        if (cache && (Date.now() - cache.lastUpdated) < TX_CACHE_MAX_AGE) {
+            console.log(`[TxCache] Hit for ${networkId}: ${cache.signatures.length} known signatures`);
+            return {
+                signatures: new Set(cache.signatures),
+                changes: cache.changes || []
+            };
+        }
+        return { signatures: new Set(), changes: [] };
+    } catch (e) {
+        return { signatures: new Set(), changes: [] };
+    }
+}
+
+async function saveCachedTxData(address: string, networkId: string, signatures: Set<string>, changes: BalanceChange[]): Promise<void> {
+    try {
+        const key = `${TX_CACHE_PREFIX}${address}:${networkId}`;
+        await chrome.storage.local.set({
+            [key]: {
+                signatures: Array.from(signatures),
+                changes,
+                lastUpdated: Date.now()
+            }
+        });
+        console.log(`[TxCache] Saved ${signatures.size} signatures for ${networkId}`);
+    } catch (e) {
+        console.error('[TxCache] Save failed:', e);
+    }
+}
+
 export async function fetchBalanceChanges(
     address: string,
     networkId?: string
@@ -246,6 +285,7 @@ export async function fetchBalanceChanges(
     }
 
     // Default: Solana via Helius
+    const effectiveNetworkId = networkId || 'solana-mainnet';
     try {
         const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || '';
         const apiKeyMatch = rpcUrl.match(/api-key=([^&]+)/);
@@ -254,17 +294,30 @@ export async function fetchBalanceChanges(
             return [];
         }
 
+        // Load cached data
+        const cached = await getCachedTxData(address, effectiveNetworkId);
+        const knownSigs = cached.signatures;
+        const cachedChanges = cached.changes;
+
         const apiKey = apiKeyMatch[1];
-        const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions?api-key=${apiKey}`; // Helius default limit is 100?
+        const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions?api-key=${apiKey}`;
 
         const response = await fetch(url);
-        if (!response.ok) return [];
+        if (!response.ok) return cachedChanges; // Return cached on error
 
         const data: HeliusEnhancedTransaction[] = await response.json();
-        const changes: BalanceChange[] = [];
+        const newChanges: BalanceChange[] = [];
+        const allSigs = new Set(knownSigs);
 
-        data.forEach(tx => {
-            if (tx.transactionError) return;
+        for (const tx of data) {
+            // Stop at first known signature
+            if (knownSigs.has(tx.signature)) {
+                console.log(`[SolanaHistory] Hit known sig, stopping. Processed ${newChanges.length} new changes`);
+                break;
+            }
+
+            allSigs.add(tx.signature);
+            if (tx.transactionError) continue;
 
             const timestamp = tx.timestamp * 1000;
 
@@ -273,10 +326,10 @@ export async function fetchBalanceChanges(
                 tx.nativeTransfers.forEach(t => {
                     const amount = t.amount / 1_000_000_000;
                     if (t.toUserAccount === address) {
-                        changes.push({ timestamp, mint: 'SOL', amount: amount, signature: tx.signature });
+                        newChanges.push({ timestamp, mint: 'SOL', amount: amount, signature: tx.signature });
                     }
                     if (t.fromUserAccount === address) {
-                        changes.push({ timestamp, mint: 'SOL', amount: -amount, signature: tx.signature });
+                        newChanges.push({ timestamp, mint: 'SOL', amount: -amount, signature: tx.signature });
                     }
                 });
             }
@@ -285,21 +338,27 @@ export async function fetchBalanceChanges(
             if (tx.tokenTransfers) {
                 tx.tokenTransfers.forEach(t => {
                     if (t.toUserAccount === address) {
-                        changes.push({ timestamp, mint: t.mint, amount: t.tokenAmount, signature: tx.signature });
+                        newChanges.push({ timestamp, mint: t.mint, amount: t.tokenAmount, signature: tx.signature });
                     }
                     if (t.fromUserAccount === address) {
-                        changes.push({ timestamp, mint: t.mint, amount: -t.tokenAmount, signature: tx.signature });
+                        newChanges.push({ timestamp, mint: t.mint, amount: -t.tokenAmount, signature: tx.signature });
                     }
                 });
             }
 
             // 3. Fee (if payer)
             if (tx.feePayer === address) {
-                changes.push({ timestamp, mint: 'SOL', amount: -(tx.fee / 1_000_000_000), signature: tx.signature });
+                newChanges.push({ timestamp, mint: 'SOL', amount: -(tx.fee / 1_000_000_000), signature: tx.signature });
             }
-        });
+        }
 
-        return changes.sort((a, b) => b.timestamp - a.timestamp); // Newest first
+        // Merge with cached changes
+        const allChanges = [...newChanges, ...cachedChanges];
+
+        // Save updated cache
+        await saveCachedTxData(address, effectiveNetworkId, allSigs, allChanges);
+
+        return allChanges.sort((a, b) => b.timestamp - a.timestamp); // Newest first
 
     } catch (error) {
         console.error('Failed to fetch balance changes:', error);
@@ -307,7 +366,7 @@ export async function fetchBalanceChanges(
     }
 }
 
-// Fetch balance changes for x1 networks via RPC (with pagination for validator wallets)
+// Fetch balance changes for x1 networks via RPC (with pagination and caching)
 async function fetchX1BalanceChanges(
     address: string,
     networkId: string
@@ -319,13 +378,25 @@ async function fetchX1BalanceChanges(
 
         console.log(`[X1History] Fetching balance changes for ${address} on ${networkId}`);
 
-        const changes: BalanceChange[] = [];
+        // Load cached data
+        const cached = await getCachedTxData(address, networkId);
+        const knownSigs = cached.signatures;
+        const cachedChanges = cached.changes;
+
+        // If we have cached data, return it quickly
+        if (cachedChanges.length > 0) {
+            console.log(`[X1History] Returning ${cachedChanges.length} cached changes`);
+        }
+
+        const newChanges: BalanceChange[] = [];
+        const allSigs = new Set(knownSigs);
         let beforeSig: string | null = null;
         let pagesChecked = 0;
         const maxPages = 10;
-        const targetChanges = 20;
+        const targetNew = 20;
+        let hitKnownSig = false;
 
-        while (changes.length < targetChanges && pagesChecked < maxPages) {
+        while (newChanges.length < targetNew && pagesChecked < maxPages && !hitKnownSig) {
             const params: { limit: number; before?: string } = { limit: 100 };
             if (beforeSig) params.before = beforeSig;
 
@@ -351,7 +422,15 @@ async function fetchX1BalanceChanges(
             pagesChecked++;
 
             for (const sig of signatures) {
-                if (changes.length >= targetChanges) break;
+                // Stop at first known signature (we already processed everything after this)
+                if (knownSigs.has(sig.signature)) {
+                    console.log(`[X1History] Hit known sig, stopping. Found ${newChanges.length} new changes`);
+                    hitKnownSig = true;
+                    break;
+                }
+
+                allSigs.add(sig.signature);
+                if (newChanges.length >= targetNew) break;
 
                 try {
                     const txResponse = await fetch(rpcUrl, {
@@ -386,7 +465,7 @@ async function fetchX1BalanceChanges(
                             const diff = (postLamports - preLamports) / 1_000_000_000;
 
                             if (Math.abs(diff) > 0.000001) {
-                                changes.push({
+                                newChanges.push({
                                     timestamp,
                                     mint: 'XNT',
                                     amount: diff,
@@ -403,8 +482,14 @@ async function fetchX1BalanceChanges(
             }
         }
 
-        console.log(`[X1History] Found ${changes.length} balance changes after ${pagesChecked} pages`);
-        return changes.sort((a, b) => b.timestamp - a.timestamp);
+        // Merge with cached changes
+        const allChanges = [...newChanges, ...cachedChanges];
+
+        // Save updated cache
+        await saveCachedTxData(address, networkId, allSigs, allChanges);
+
+        console.log(`[X1History] Total: ${allChanges.length} changes (${newChanges.length} new + ${cachedChanges.length} cached)`);
+        return allChanges.sort((a, b) => b.timestamp - a.timestamp);
 
     } catch (error) {
         console.error('[X1History] Failed to fetch balance changes:', error);
