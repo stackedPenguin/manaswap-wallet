@@ -2,6 +2,20 @@ import type { NetworkClusterId } from '../shared/networks';
 import type { SiteDetectionPayload } from '../shared/types';
 import { detectNetwork } from '../shared/detection';
 
+// Wrapper to handle "Extension context invalidated" gracefully
+const safeSendMessage = async <T>(message: unknown): Promise<T | null> => {
+  try {
+    return await chrome.runtime.sendMessage(message);
+  } catch (error) {
+    // Silently ignore "Extension context invalidated" - happens when extension reloads
+    if (error instanceof Error && error.message.includes('Extension context invalidated')) {
+      console.warn('[Manaswap] Extension reloaded - please refresh this page');
+      return null;
+    }
+    throw error;
+  }
+};
+
 const injectProvider = () => {
   try {
     const url = chrome.runtime.getURL('assets/inject.js');
@@ -40,9 +54,7 @@ const notifyDetection = (network: NetworkClusterId, confidence: number) => {
     confidence,
   };
 
-  chrome.runtime
-    .sendMessage({ type: 'manaswap:detectionEvent', payload })
-    .catch((error) => console.warn('[Manaswap] Unable to notify detection', error));
+  safeSendMessage({ type: 'manaswap:detectionEvent', payload });
 };
 
 // Listen for provider requests and forward to background
@@ -79,15 +91,14 @@ window.addEventListener('message', async (event) => {
             return '/favicon.ico'; // Fallback
           };
 
-          const connectRes = await chrome.runtime.sendMessage({
+          response = await safeSendMessage({
             type: 'manaswap:dappConnect',
             payload: { origin, hostname, icon: getFavicon() },
           });
-          response = connectRes;
           break;
         }
         case 'disconnect-request': {
-          await chrome.runtime.sendMessage({
+          await safeSendMessage({
             type: 'manaswap:dappDisconnect',
             payload: { origin },
           });
@@ -95,52 +106,46 @@ window.addEventListener('message', async (event) => {
           break;
         }
         case 'sign-transaction': {
-          const signRes = await chrome.runtime.sendMessage({
+          response = await safeSendMessage({
             type: 'manaswap:dappSignTransaction',
             payload: { origin, transaction: payload },
           });
-          response = signRes;
           break;
         }
         case 'sign-all-transactions': {
-          const signAllRes = await chrome.runtime.sendMessage({
+          response = await safeSendMessage({
             type: 'manaswap:dappSignAllTransactions',
             payload: { origin, transactions: payload },
           });
-          response = signAllRes;
           break;
         }
         case 'sign-message': {
-          const signMsgRes = await chrome.runtime.sendMessage({
+          response = await safeSendMessage({
             type: 'manaswap:dappSignMessage',
             payload: { origin, message: new Uint8Array(payload as number[]) },
           });
-          response = signMsgRes;
           break;
         }
         case 'get-network': {
-          const networkRes = await chrome.runtime.sendMessage({
+          response = await safeSendMessage({
             type: 'manaswap:dappGetNetwork',
             payload: { origin },
           });
-          response = networkRes;
           break;
         }
         case 'switch-chain': {
-          const switchRes = await chrome.runtime.sendMessage({
+          response = await safeSendMessage({
             type: 'manaswap:dappSwitchChain',
             payload: { origin, networkId: (payload as { networkId: string }).networkId },
           });
-          response = switchRes;
           break;
         }
         case 'sign-and-send-transaction': {
           const { transaction, options } = payload as { transaction: unknown; options?: { skipPreflight?: boolean } };
-          const signSendRes = await chrome.runtime.sendMessage({
+          response = await safeSendMessage({
             type: 'manaswap:dappSignAndSendTransaction',
             payload: { origin, transaction, options },
           });
-          response = signSendRes;
           break;
         }
         default:
