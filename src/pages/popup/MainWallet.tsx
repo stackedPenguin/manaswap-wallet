@@ -344,6 +344,7 @@ export function MainWallet() {
   const [initialDefiTab, setInitialDefiTab] = useState<'limit' | 'dca' | 'perps'>('perps');
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioDataPoint[]>([]);
   const [showChart, setShowChart] = useState(true);
+  const [chartInterval, setChartInterval] = useState<'48h' | '1w' | '1m'>('48h');
 
   // Auto-dismiss toast after 3 seconds
   useEffect(() => {
@@ -713,8 +714,18 @@ export function MainWallet() {
       lineWidth: 2,
     });
 
-    // Sort history by timestamp just in case
-    const sortedHistory = [...portfolioHistory].sort((a, b) => a.timestamp - b.timestamp);
+    // Calculate interval cutoff time
+    const intervalMs = {
+      '48h': 48 * 60 * 60 * 1000,
+      '1w': 7 * 24 * 60 * 60 * 1000,
+      '1m': 30 * 24 * 60 * 60 * 1000,
+    }[chartInterval];
+    const cutoffTime = Date.now() - intervalMs;
+
+    // Filter and sort history by timestamp based on interval
+    const sortedHistory = [...portfolioHistory]
+      .filter(p => p.timestamp >= cutoffTime)
+      .sort((a, b) => a.timestamp - b.timestamp);
 
     // Add current value as the latest point if it's newer than the last history point
     // This makes the chart feel "live"
@@ -725,9 +736,8 @@ export function MainWallet() {
         sortedHistory.push({ timestamp: Date.now(), value: totalUsd });
       }
     } else {
-      // If no history, synthesize a start point to show a flat line
-      // Use 24h ago or just 1h ago for initial view
-      sortedHistory.push({ timestamp: Date.now() - 3600000, value: totalUsd });
+      // If no history in interval, synthesize points to show flat line
+      sortedHistory.push({ timestamp: cutoffTime, value: totalUsd });
       sortedHistory.push({ timestamp: Date.now(), value: totalUsd });
     }
 
@@ -800,7 +810,7 @@ export function MainWallet() {
     return () => {
       chart.remove();
     };
-  }, [view, portfolioHistory, totalUsd, showChart]);
+  }, [view, portfolioHistory, totalUsd, showChart, chartInterval]);
 
   // Unified Asset Interface
   interface UnifiedAsset {
@@ -1269,6 +1279,30 @@ export function MainWallet() {
             <div className="total-equity-amount">
               ${totalUsd.toFixed(2)}
             </div>
+            {/* Interval Selector */}
+            {showChart && (
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                {(['48h', '1w', '1m'] as const).map(interval => (
+                  <button
+                    key={interval}
+                    onClick={() => setChartInterval(interval)}
+                    style={{
+                      background: chartInterval === interval ? 'var(--primary)' : 'var(--surface-light)',
+                      color: chartInterval === interval ? '#fff' : 'var(--text-secondary)',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '4px 10px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    {interval.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Portfolio Chart Container */}
             {showChart && <div id="portfolio-chart" style={{ width: '100%', height: '150px', marginTop: '12px', position: 'relative' }} />}
           </div>
