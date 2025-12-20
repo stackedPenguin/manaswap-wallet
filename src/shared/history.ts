@@ -307,7 +307,7 @@ export async function fetchBalanceChanges(
     }
 }
 
-// Fetch balance changes for x1 networks via RPC
+// Fetch balance changes for x1 networks via RPC (with pagination for validator wallets)
 async function fetchX1BalanceChanges(
     address: string,
     networkId: string
@@ -319,84 +319,91 @@ async function fetchX1BalanceChanges(
 
         console.log(`[X1History] Fetching balance changes for ${address} on ${networkId}`);
 
-        // 1. Get recent signatures (limited to 50 for performance)
-        const sigResponse = await fetch(rpcUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'getSignaturesForAddress',
-                params: [address, { limit: 50 }]
-            })
-        });
-
-        if (!sigResponse.ok) return [];
-        const sigData = await sigResponse.json();
-        const signatures = sigData.result || [];
-
-        if (signatures.length === 0) {
-            console.log('[X1History] No signatures found');
-            return [];
-        }
-
-        console.log(`[X1History] Found ${signatures.length} signatures`);
-
-        // 2. Fetch each transaction and parse native balance changes
         const changes: BalanceChange[] = [];
+        let beforeSig: string | null = null;
+        let pagesChecked = 0;
+        const maxPages = 10;
+        const targetChanges = 20;
 
-        for (const sig of signatures.slice(0, 20)) { // Limit to 20 for performance
-            try {
-                const txResponse = await fetch(rpcUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        jsonrpc: '2.0',
-                        id: 1,
-                        method: 'getTransaction',
-                        params: [sig.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }]
-                    })
-                });
+        while (changes.length < targetChanges && pagesChecked < maxPages) {
+            const params: { limit: number; before?: string } = { limit: 100 };
+            if (beforeSig) params.before = beforeSig;
 
-                if (!txResponse.ok) continue;
-                const txData = await txResponse.json();
-                const tx = txData.result;
+            const sigResponse = await fetch(rpcUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'getSignaturesForAddress',
+                    params: [address, params]
+                })
+            });
 
-                if (!tx || !tx.meta || tx.meta.err) continue;
+            if (!sigResponse.ok) break;
+            const sigData = await sigResponse.json();
+            const signatures = sigData.result || [];
 
-                const timestamp = (sig.blockTime || tx.blockTime || 0) * 1000;
-                if (timestamp === 0) continue;
+            if (signatures.length === 0) break;
 
-                // Parse native balance change (preBalances vs postBalances)
-                const accountKeys = tx.transaction.message.accountKeys || [];
-                const preBalances = tx.meta.preBalances || [];
-                const postBalances = tx.meta.postBalances || [];
+            console.log(`[X1History] Page ${pagesChecked + 1}: Checking ${signatures.length} signatures...`);
+            beforeSig = signatures[signatures.length - 1]?.signature;
+            pagesChecked++;
 
-                for (let i = 0; i < accountKeys.length; i++) {
-                    const key = typeof accountKeys[i] === 'string' ? accountKeys[i] : accountKeys[i].pubkey;
-                    if (key === address) {
-                        const preLamports = preBalances[i] || 0;
-                        const postLamports = postBalances[i] || 0;
-                        const diff = (postLamports - preLamports) / 1_000_000_000;
+            for (const sig of signatures) {
+                if (changes.length >= targetChanges) break;
 
-                        if (Math.abs(diff) > 0.000001) {
-                            // Use 'XNT' as mint identifier for x1 native
-                            changes.push({
-                                timestamp,
-                                mint: 'XNT',
-                                amount: diff,
-                                signature: sig.signature
-                            });
+                try {
+                    const txResponse = await fetch(rpcUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            jsonrpc: '2.0',
+                            id: 1,
+                            method: 'getTransaction',
+                            params: [sig.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }]
+                        })
+                    });
+
+                    if (!txResponse.ok) continue;
+                    const txData = await txResponse.json();
+                    const tx = txData.result;
+
+                    if (!tx?.meta || tx.meta.err) continue;
+
+                    const timestamp = (sig.blockTime || tx.blockTime || 0) * 1000;
+                    if (timestamp === 0) continue;
+
+                    const accountKeys = tx.transaction?.message?.accountKeys || [];
+                    const preBalances = tx.meta.preBalances || [];
+                    const postBalances = tx.meta.postBalances || [];
+
+                    for (let i = 0; i < accountKeys.length; i++) {
+                        const key = typeof accountKeys[i] === 'string' ? accountKeys[i] : accountKeys[i]?.pubkey;
+                        if (key === address) {
+                            const preLamports = preBalances[i] || 0;
+                            const postLamports = postBalances[i] || 0;
+                            const diff = (postLamports - preLamports) / 1_000_000_000;
+
+                            if (Math.abs(diff) > 0.000001) {
+                                changes.push({
+                                    timestamp,
+                                    mint: 'XNT',
+                                    amount: diff,
+                                    signature: sig.signature
+                                });
+                                console.log(`[X1History] Found: ${diff > 0 ? '+' : ''}${diff.toFixed(4)} XNT`);
+                            }
+                            break;
                         }
-                        break;
                     }
+                } catch (e) {
+                    // Skip tx errors
                 }
-            } catch (e) {
-                console.error('[X1History] Error fetching tx:', e);
             }
         }
 
-        console.log(`[X1History] Found ${changes.length} balance changes`);
+        console.log(`[X1History] Found ${changes.length} balance changes after ${pagesChecked} pages`);
         return changes.sort((a, b) => b.timestamp - a.timestamp);
 
     } catch (error) {
