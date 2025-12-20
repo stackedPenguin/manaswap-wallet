@@ -746,15 +746,17 @@ export function MainWallet() {
       value: p.value,
     }));
 
-    // Deduplicate time points (lightweight-charts strictness)
-    const uniqueData: { time: any; value: number }[] = [];
-    const seenTimes = new Set();
+    // Deduplicate time points (lightweight-charts strictness) - keep last value for each time
+    const timeToValue = new Map<number, number>();
     data.forEach(p => {
-      if (!seenTimes.has(p.time)) {
-        seenTimes.add(p.time);
-        uniqueData.push(p);
-      }
+      timeToValue.set(p.time, p.value);
     });
+
+    const uniqueData = Array.from(timeToValue.entries())
+      .map(([time, value]) => ({ time: time as any, value }))
+      .sort((a, b) => a.time - b.time);
+
+    console.log('[ChartDebug] Data points:', uniqueData.length, 'Min:', Math.min(...uniqueData.map(d => d.value)).toFixed(2), 'Max:', Math.max(...uniqueData.map(d => d.value)).toFixed(2));
 
     if (uniqueData.length > 0) {
       areaSeries.setData(uniqueData);
