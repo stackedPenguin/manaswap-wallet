@@ -759,6 +759,15 @@ export function MainWallet() {
     if (uniqueData.length > 0) {
       areaSeries.setData(uniqueData);
       chart.timeScale().fitContent();
+
+      // Force proper y-axis scaling to show full range
+      chart.priceScale('right').applyOptions({
+        autoScale: true,
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.1,
+        },
+      });
     }
 
     // Tooltip Logic
