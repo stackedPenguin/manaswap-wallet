@@ -917,22 +917,63 @@ export function MainWallet() {
     if (view === 'home' && unifiedAssets.length > 0 && selectedAccount && selectedNetwork) {
       console.log('[MainWalletDebug] Calculating portfolio history...');
 
-      // For X1 networks: Generate flat history at $1/XNT (no historical price data available)
+      // For X1 networks: Calculate history using balance changes (no OHLC, fixed $1/XNT)
       if (selectedNetwork.kind === 'x1') {
         const balance = balances.get(selectedNetwork.id);
         const xntBalance = balance?.solBalance || 0;
-        const flatValue = xntBalance * 1.0; // $1 per XNT
+        const XNT_PRICE = 1.0; // $1 per XNT
 
-        // Generate flat history for past 7 days
-        const now = Date.now();
-        const flatHistory: PortfolioDataPoint[] = [];
-        for (let i = 0; i < 168; i++) {
-          flatHistory.push({
-            timestamp: now - (i * 3600 * 1000),
-            value: flatValue
+        console.log('[MainWalletDebug] X1 network detected, fetching balance changes...');
+        console.log('[MainWalletDebug] Current XNT balance:', xntBalance);
+
+        // Fetch x1 balance changes
+        import('../../shared/history').then(({ fetchBalanceChanges }) => {
+          fetchBalanceChanges(selectedAccount.address, selectedNetwork.id).then(balanceChanges => {
+            console.log('[MainWalletDebug] X1 balance changes received:', balanceChanges.length);
+
+            // Generate hourly timestamps for past 7 days
+            const now = Date.now();
+            const history: PortfolioDataPoint[] = [];
+            let currentBalance = xntBalance;
+
+            // Sort balance changes by timestamp (newest first for backward replay)
+            const sortedChanges = [...balanceChanges].sort((a, b) => b.timestamp - a.timestamp);
+            let changeIndex = 0;
+
+            // Calculate portfolio value at each hour going backward
+            for (let i = 0; i < 168; i++) {
+              const time = now - (i * 3600 * 1000);
+
+              // Apply balance changes that occurred after this time
+              while (changeIndex < sortedChanges.length && sortedChanges[changeIndex].timestamp > time) {
+                // Reverse the change to get previous balance
+                currentBalance -= sortedChanges[changeIndex].amount;
+                changeIndex++;
+              }
+
+              // Value can't be negative (clamp to 0)
+              const value = Math.max(0, currentBalance * XNT_PRICE);
+              history.push({ timestamp: time, value });
+            }
+
+            console.log('[MainWalletDebug] X1 portfolio history generated:', history.length, 'points');
+            console.log('[MainWalletDebug] First value:', history[history.length - 1]?.value, 'Last value:', history[0]?.value);
+
+            setPortfolioHistory(history.reverse());
+          }).catch(err => {
+            console.error('[MainWalletDebug] X1 fetchBalanceChanges error:', err);
+            // Fallback to flat history
+            const fallbackNow = Date.now();
+            const flatHistory: PortfolioDataPoint[] = [];
+            for (let i = 0; i < 168; i++) {
+              flatHistory.push({
+                timestamp: fallbackNow - (i * 3600 * 1000),
+                value: xntBalance * XNT_PRICE
+              });
+            }
+            setPortfolioHistory(flatHistory.reverse());
           });
-        }
-        setPortfolioHistory(flatHistory.reverse());
+        });
         return;
       }
 
