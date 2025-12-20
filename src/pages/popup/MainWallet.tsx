@@ -938,7 +938,7 @@ export function MainWallet() {
 
       // For Solana networks: Calculate with OHLC data
       const assetsForHistory = unifiedAssets
-        .filter(a => (a.type === 'token' && (a.value > 1 || a.symbol === 'SOL')) || (a.type === 'defi' && a.value > 1)) // Include Tokens > $1, SOL, and DeFi > $1
+        .filter(a => (a.type === 'token' && (a.value > 1 || a.symbol === 'SOL' || a.symbol === 'XNT')) || (a.type === 'defi' && a.value > 1)) // Include Tokens > $1, SOL, XNT, and DeFi > $1
         .map(a => {
           if (a.type === 'defi' && a.defi) {
             // For DeFi, map to underlying mint and calculate effective amount
@@ -976,7 +976,7 @@ export function MainWallet() {
           // Actually, I can use a local variable if I could cancel the previous promise, but I can't.
           // Let's just remove the check first.
 
-          fetchBalanceChanges(selectedAccount.address).then(balanceChanges => {
+          fetchBalanceChanges(selectedAccount.address, selectedNetwork.id).then(balanceChanges => {
             calculateHistoricalPortfolio(assetsForHistory, balanceChanges, prices).then(history => {
               if (history.length > 0) {
                 // Always update with latest data

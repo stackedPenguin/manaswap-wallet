@@ -82,6 +82,11 @@ export async function calculateHistoricalPortfolio(
         'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 1.0, // USDT
     };
 
+    // Fixed price tokens (no OHLC available)
+    const FIXED_PRICE_TOKENS: Record<string, number> = {
+        'XNT': 1.0, // X1 Native Token - hardcoded $1
+    };
+
     // Tokens with reliable GeckoTerminal OHLC (pool prices are in USD)
     const RELIABLE_OHLC_TOKENS = new Set([
         'So11111111111111111111111111111111111111112', // SOL
@@ -91,6 +96,7 @@ export async function calculateHistoricalPortfolio(
     const processAsset = async (mint: string) => {
         try {
             // Map 'SOL' to Wrapped SOL mint for price fetching if needed
+            // Keep 'XNT' as is for fixed price handling
             const queryMint = mint === 'SOL' ? 'So11111111111111111111111111111111111111112' : mint;
 
             // For stablecoins, generate synthetic price history at $1
@@ -104,6 +110,21 @@ export async function calculateHistoricalPortfolio(
                     });
                 }
                 priceHistoryMap.set(mint, syntheticPrices.reverse());
+                return;
+            }
+
+            // For fixed price tokens (like XNT), generate synthetic price history
+            if (FIXED_PRICE_TOKENS[mint]) {
+                const now = Date.now();
+                const syntheticPrices = [];
+                for (let i = 0; i < 168; i++) {
+                    syntheticPrices.push({
+                        time: now - (i * 3600 * 1000),
+                        price: FIXED_PRICE_TOKENS[mint]
+                    });
+                }
+                priceHistoryMap.set(mint, syntheticPrices.reverse());
+                console.log(`[PortfolioDebug] Using fixed price $${FIXED_PRICE_TOKENS[mint]} for ${mint}`);
                 return;
             }
 
