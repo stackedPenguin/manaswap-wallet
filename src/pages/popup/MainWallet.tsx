@@ -964,22 +964,20 @@ export function MainWallet() {
           };
         });
 
+      console.log('[MainWalletDebug] Assets for history:', assetsForHistory.length, assetsForHistory.map(a => ({ mint: a.mint.slice(0, 8), amount: a.amount })));
+
       if (assetsForHistory.length > 0) {
         Promise.all([
           import('../../shared/portfolio'),
           import('../../shared/history')
         ]).then(([{ calculateHistoricalPortfolio }, { fetchBalanceChanges }]) => {
-          // Fetch balance changes for replay
-          // Fetch balance changes for replay
-          // Store ID on the function scope or use a ref? 
-          // We need a ref outside the effect.
-          // Since I can't easily add a ref with replace_file_content without changing the whole component,
-          // I will just remove the bad check for now. The race condition is secondary (usually last request finishes last).
-          // Actually, I can use a local variable if I could cancel the previous promise, but I can't.
-          // Let's just remove the check first.
+          console.log('[MainWalletDebug] Fetching balance changes for network:', selectedNetwork.id);
 
           fetchBalanceChanges(selectedAccount.address, selectedNetwork.id).then(balanceChanges => {
+            console.log('[MainWalletDebug] Balance changes received:', balanceChanges.length);
+
             calculateHistoricalPortfolio(assetsForHistory, balanceChanges, prices).then(history => {
+              console.log('[MainWalletDebug] Portfolio history calculated:', history.length, 'points');
               if (history.length > 0) {
                 // Always update with latest data
                 setPortfolioHistory(history);
@@ -988,9 +986,17 @@ export function MainWallet() {
                   savePortfolioHistory(selectedAccount.address, history);
                 });
               }
+            }).catch(err => {
+              console.error('[MainWalletDebug] calculateHistoricalPortfolio error:', err);
             });
+          }).catch(err => {
+            console.error('[MainWalletDebug] fetchBalanceChanges error:', err);
           });
+        }).catch(err => {
+          console.error('[MainWalletDebug] Module import error:', err);
         });
+      } else {
+        console.log('[MainWalletDebug] No assets for history, skipping calculation');
       }
     }
   }, [unifiedAssets, selectedAccount?.address, selectedNetwork]);
