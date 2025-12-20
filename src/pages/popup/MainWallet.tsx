@@ -863,7 +863,7 @@ export function MainWallet() {
         symbol: selectedNetwork.kind === 'x1' ? 'XNT' : 'SOL',
         amount: (balance.solBalance).toString(),
         value: balance.solBalance * price,
-        logoURI: selectedNetwork.kind === 'x1' ? undefined : 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+        logoURI: selectedNetwork.kind === 'x1' ? '/icons/x1-logo.png' : 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
         networkId: selectedNetwork.id,
         networkKind: selectedNetwork.kind,
         token: {
