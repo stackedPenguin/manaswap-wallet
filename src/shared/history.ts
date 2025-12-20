@@ -432,19 +432,34 @@ async function fetchX1BalanceChanges(
                 allSigs.add(sig.signature);
                 if (newChanges.length >= targetNew) break;
 
-                try {
-                    const txResponse = await fetch(rpcUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            jsonrpc: '2.0',
-                            id: 1,
-                            method: 'getTransaction',
-                            params: [sig.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }]
-                        })
-                    });
+                // Throttle: wait between requests to avoid 429
+                await new Promise(resolve => setTimeout(resolve, 150));
 
-                    if (!txResponse.ok) continue;
+                try {
+                    // Retry logic for rate limiting
+                    let txResponse: Response | null = null;
+                    for (let retry = 0; retry < 3; retry++) {
+                        txResponse = await fetch(rpcUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                jsonrpc: '2.0',
+                                id: 1,
+                                method: 'getTransaction',
+                                params: [sig.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }]
+                            })
+                        });
+
+                        if (txResponse.status === 429) {
+                            const backoffMs = 500 * (retry + 1);
+                            console.log(`[X1History] Rate limited, waiting ${backoffMs}ms...`);
+                            await new Promise(resolve => setTimeout(resolve, backoffMs));
+                            continue;
+                        }
+                        break;
+                    }
+
+                    if (!txResponse || !txResponse.ok) continue;
                     const txData = await txResponse.json();
                     const tx = txData.result;
 
