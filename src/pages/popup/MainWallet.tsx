@@ -956,7 +956,9 @@ export function MainWallet() {
           }
 
           return {
-            mint: a.mint || (a.symbol === 'SOL' ? 'So11111111111111111111111111111111111111112' : a.id),
+            // For x1 native token (XNT), use 'XNT' as mint to match balance changes
+            // For Solana native token (SOL), use wrapped SOL mint
+            mint: a.mint || (a.symbol === 'XNT' ? 'XNT' : (a.symbol === 'SOL' ? 'So11111111111111111111111111111111111111112' : a.id)),
             amount: parseFloat(a.amount),
             value: a.value
           };
