@@ -117,6 +117,12 @@ export function StakingPage({
         return val?.name || `${address.slice(0, 8)}...`;
     };
 
+    const getValidatorImage = (address: string) => {
+        if (address === DEFAULT_VALIDATOR_ADDRESS) return '/icons/x1-logo.png';
+        const val = validators.find(v => v.voteAccount === address);
+        return val?.imageUrl;
+    };
+
     // Actions
     const handleStake = async () => {
         if (!selectedValidator || !amount) return;
@@ -275,7 +281,7 @@ export function StakingPage({
                         >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 {selectedValidator ? (
-                                    <Identicon address={selectedValidator} size={24} />
+                                    <Identicon address={selectedValidator} size={24} imageUrl={getValidatorImage(selectedValidator)} />
                                 ) : (
                                     <div style={{
                                         width: '24px', height: '24px', borderRadius: '50%',
@@ -346,7 +352,7 @@ export function StakingPage({
                                             gap: '8px'
                                         }}
                                     >
-                                        <Identicon address={v.voteAccount} size={24} />
+                                        <Identicon address={v.voteAccount} size={24} imageUrl={v.imageUrl} />
                                         <div style={{ flex: 1 }}>
                                             <div style={{ fontSize: '13px' }}>{v.name || `${v.voteAccount.slice(0, 6)}...`}</div>
                                             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>

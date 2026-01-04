@@ -75,6 +75,7 @@ export function Toast({ message, type = 'success', onClose }: { message: string;
   );
 }
 
+import { useState } from 'react';
 import {
   Send,
   ArrowDown,
@@ -106,7 +107,6 @@ import {
 
 } from 'lucide-react';
 
-// Icon Components
 // Icon Components
 export const Icons = {
   Send: (props: any) => <Send size={20} {...props} />,
@@ -178,11 +178,31 @@ export function Toggle({ checked, onChange, label }: ToggleProps) {
   );
 }
 
-export function Identicon({ address, size = 24, className = '' }: { address: string; size?: number; className?: string }) {
+export function Identicon({ address, size = 24, className = '', imageUrl }: { address: string; size?: number; className?: string; imageUrl?: string | null }) {
+  const [imgError, setImgError] = useState(false);
+
   // Simple deterministic color generation
   const hash = address.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
   const hue = Math.abs(hash % 360);
   const color = `hsl(${hue}, 70%, 60%)`;
+
+  if (imageUrl && !imgError) {
+    return (
+      <img
+        src={imageUrl}
+        alt="Validator"
+        className={className}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: '50%',
+          objectFit: 'cover',
+          border: '1px solid rgba(255,255,255,0.1)'
+        }}
+        onError={() => setImgError(true)}
+      />
+    );
+  }
 
   return (
     <div
@@ -205,4 +225,3 @@ export function Identicon({ address, size = 24, className = '' }: { address: str
     </div>
   );
 }
-

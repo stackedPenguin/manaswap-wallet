@@ -14,6 +14,10 @@ import {
     Keypair,
     LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
+import { Buffer } from 'buffer';
+
+const CONFIG_PROGRAM_ID = new PublicKey('Config1111111111111111111111111111111111111');
+const VALIDATOR_INFO_KEY = 'Va1idator1nfo111111111111111111111111111111';
 
 const STAKE_ACCOUNT_SIZE = 200; // bytes
 
@@ -57,23 +61,89 @@ const VALIDATOR_METADATA: Record<string, { name: string; imageUrl: string }> = {
     }
 };
 
+
+interface ValidatorMeta {
+    identityPubkey: string;
+    name: string | null;
+    website: string | null;
+    iconUrl: string | null;
+}
+
+function decodeValidatorInfo(data: Buffer): ValidatorMeta | null {
+    try {
+        if (data.length < 70) return null;
+        const numKeys = data[0];
+        if (numKeys !== 2) return null;
+
+        const firstKey = new PublicKey(data.slice(1, 33)).toBase58();
+        if (firstKey !== VALIDATOR_INFO_KEY) return null;
+
+        const identityPubkey = new PublicKey(data.slice(34, 66)).toBase58();
+        const dataStr = data.toString('utf8');
+
+        const braceIndex = dataStr.indexOf('{"');
+        if (braceIndex === -1) return null;
+
+        // Simple JSON extraction
+        let depth = 0;
+        let endIndex = -1;
+        for (let i = braceIndex; i < dataStr.length; i++) {
+            if (dataStr[i] === '{') depth++;
+            if (dataStr[i] === '}') depth--;
+            if (depth === 0) {
+                endIndex = i + 1;
+                break;
+            }
+        }
+        if (endIndex === -1) return null;
+
+        const info = JSON.parse(dataStr.slice(braceIndex, endIndex));
+        return {
+            identityPubkey,
+            name: info.name || null,
+            website: info.website || null,
+            iconUrl: info.iconUrl || info.icon_url || null
+        };
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Fetch all active validators from the X1 network
  */
 export async function getValidators(connection: Connection): Promise<ValidatorInfo[]> {
-    const voteAccounts = await connection.getVoteAccounts();
+    const [voteAccounts, configAccounts] = await Promise.all([
+        connection.getVoteAccounts(),
+        connection.getProgramAccounts(CONFIG_PROGRAM_ID)
+    ]);
 
-    const validators: ValidatorInfo[] = voteAccounts.current.map(v => ({
-        voteAccount: v.votePubkey,
-        identity: v.nodePubkey,
-        commission: v.commission,
-        activatedStake: v.activatedStake,
-        lastVote: v.lastVote,
-        credits: v.epochCredits.length > 0
-            ? v.epochCredits[v.epochCredits.length - 1][1]
-            : 0,
-        ...VALIDATOR_METADATA[v.votePubkey]
-    }));
+    const infoMap = new Map<string, ValidatorMeta>();
+    for (const { account } of configAccounts) {
+        const info = decodeValidatorInfo(account.data);
+        if (info && info.identityPubkey) {
+            infoMap.set(info.identityPubkey, info);
+        }
+    }
+
+    const validators: ValidatorInfo[] = voteAccounts.current.map(v => {
+        const meta = infoMap.get(v.nodePubkey);
+        // Prioritize on-chain metadata, then hardcoded fallback
+        const hardcoded = VALIDATOR_METADATA[v.votePubkey];
+
+        return {
+            voteAccount: v.votePubkey,
+            identity: v.nodePubkey,
+            commission: v.commission,
+            activatedStake: v.activatedStake,
+            lastVote: v.lastVote,
+            credits: v.epochCredits.length > 0
+                ? v.epochCredits[v.epochCredits.length - 1][1]
+                : 0,
+            name: meta?.name || hardcoded?.name,
+            imageUrl: meta?.iconUrl || hardcoded?.imageUrl
+        };
+    });
 
     // Sort by activated stake descending
     return validators.sort((a, b) => b.activatedStake - a.activatedStake);
