@@ -153,6 +153,7 @@ export type ManaswapMessage =
   | { type: 'manaswap:addKeySource'; payload: { type: KeySourceType; value?: string; label?: string } }
   | { type: 'manaswap:importAccount'; payload: { privateKey: string; label?: string; password: string } }
   | { type: 'manaswap:setAccountLabel'; payload: { address: string; label: string } }
+  | { type: 'manaswap:deleteAccount'; payload: { address: string } }
   | { type: 'manaswap:getLedgerAccounts'; payload: { pathStart?: number; limit?: number } }
   // Network Health Messages
   | { type: 'manaswap:checkNetworkHealth'; payload: { networkId: NetworkClusterId } }

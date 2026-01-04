@@ -190,6 +190,25 @@ body {
 .dropdown-scroll {
   max-height: 240px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #52525b transparent;
+}
+
+.dropdown-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dropdown-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dropdown-scroll::-webkit-scrollbar-thumb {
+  background: #52525b;
+  border-radius: 3px;
+}
+
+.dropdown-scroll::-webkit-scrollbar-thumb:hover {
+  background: #71717a;
 }
 
 .dropdown-item {
@@ -883,18 +902,37 @@ button:focus-visible {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 20px;
+  gap: 6px;
+  margin-bottom: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: #52525b transparent;
+}
+
+.account-management-modal .accounts-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.account-management-modal .accounts-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.account-management-modal .accounts-list::-webkit-scrollbar-thumb {
+  background: #52525b;
+  border-radius: 3px;
+}
+
+.account-management-modal .accounts-list::-webkit-scrollbar-thumb:hover {
+  background: #71717a;
 }
 
 .account-management-modal .account-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 10px 12px;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: 16px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -905,28 +943,33 @@ button:focus-visible {
 }
 
 .account-management-modal .account-icon {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-  border-radius: 12px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
+  flex-shrink: 0;
 }
 
 .account-management-modal .account-info {
   flex: 1;
+  min-width: 0;
 }
 
 .account-management-modal .account-label {
   font-weight: 600;
-  font-size: 1rem;
-  margin-bottom: 4px;
+  font-size: 0.9rem;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .account-management-modal .account-address {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
 }
 

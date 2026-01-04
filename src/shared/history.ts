@@ -1,4 +1,4 @@
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import type { TransactionActivity } from './types';
 import type { NetworkClusterId } from './networks';
 
@@ -32,7 +32,6 @@ async function fetchRpcBasedHistory(
     limit: number
 ): Promise<TransactionActivity[]> {
     try {
-        const { PublicKey } = await import('@solana/web3.js');
         const pubkey = new PublicKey(address);
 
         // Get confirmed signatures

@@ -1,5 +1,9 @@
 import { getNetworkConfig, NETWORKS, getAllNetworks, checkNetworkHealth, type NetworkClusterId, type NetworkHealth } from '../shared/networks';
 import { defaultSettings, readSettings, writeSettings } from '../shared/settings';
+// Polyfill window for Service Worker (needed for @solana/web3.js WebSocket)
+if (typeof window === 'undefined') {
+  (self as any).window = self;
+}
 import type { DAppPermission, ManaswapMessage, Notification, PendingRequest, SiteDetectionPayload, WalletSettings } from '../shared/types';
 import { fetchAccountBalance } from '../shared/balances';
 import { fetchTokenPrices } from '../shared/prices';
@@ -21,7 +25,8 @@ import {
   getMainKeypair,
   getAccountKeypair,
   getAccountInfo,
-  setAccountLabel
+  setAccountLabel,
+  deleteAccount
 } from './vault';
 import { Connection, VersionedTransaction, Transaction, Keypair } from '@solana/web3.js';
 import nacl from 'tweetnacl';
@@ -381,6 +386,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       }
       case 'manaswap:addAccount': {
         try {
+          await getVaultState(); // Ensure session is restored
           const account = await addAccount(message.payload.label);
           sendResponse({ success: true, account });
         } catch (e: any) {
@@ -390,7 +396,18 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       }
       case 'manaswap:setAccountLabel': {
         try {
+          await getVaultState(); // Ensure session is restored
           await setAccountLabel(message.payload.address, message.payload.label);
+          sendResponse({ success: true });
+        } catch (e: any) {
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:deleteAccount': {
+        try {
+          await getVaultState(); // Ensure session is restored
+          await deleteAccount(message.payload.address);
           sendResponse({ success: true });
         } catch (e: any) {
           sendResponse({ success: false, error: e.message });
@@ -399,6 +416,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       }
       case 'manaswap:importAccount': {
         try {
+          await getVaultState(); // Ensure session is restored
           const account = await importAccount(message.payload.privateKey, message.payload.label);
           sendResponse({ success: true, account });
         } catch (e: any) {
@@ -417,6 +435,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       }
       case 'manaswap:discoverAccounts': {
         try {
+          await getVaultState(); // Ensure session is restored
           const config = getNetworkConfig(message.payload.networkId);
           const connection = new Connection(config.rpcUrl, 'confirmed');
           const count = await discoverAccounts(connection);
@@ -428,6 +447,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       }
       case 'manaswap:addKeySource': {
         try {
+          await getVaultState(); // Ensure session is restored
           await addKeySource(message.payload.type, message.payload.value, message.payload.label);
           sendResponse({ success: true });
         } catch (e: any) {

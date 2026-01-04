@@ -11,7 +11,8 @@ import { AccountManagement, AccountDetailsModal, LedgerConnectModal } from './Ac
 import { SendTransactionModal } from './SendTransactionModal';
 import { ReceiveModal } from './ReceiveModal';
 import { SwapModal } from './SwapModal';
-import { StakingModal } from './StakingModal';
+import { StakingPage } from './StakingPage';
+import { getStakeAccountsForWallet, getX1RpcUrl } from '../../shared/staking';
 import { TokenDetails } from './TokenDetails';
 import { DefiPositions } from './DefiPositions';
 import { Skeleton, Icons } from '../../shared/ui';
@@ -335,9 +336,8 @@ export function MainWallet() {
   const [tokenToSend, setTokenToSend] = useState<UnifiedTokenBalance | null>(null);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [showSwapModal, setShowSwapModal] = useState(false);
-  const [showStakingModal, setShowStakingModal] = useState(false);
   const [showNetworkModal, setShowNetworkModal] = useState(false);
-  const [view, setView] = useState<'home' | 'history' | 'defi'>('home');
+  const [view, setView] = useState<'home' | 'history' | 'defi' | 'staking'>('home');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [prices, setPrices] = useState<Map<string, number>>(new Map());
   const [selectedTokenForDetails, setSelectedTokenForDetails] = useState<UnifiedTokenBalance | null>(null);
@@ -347,6 +347,7 @@ export function MainWallet() {
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioDataPoint[]>([]);
   const [showChart, setShowChart] = useState(true);
   const [chartInterval, setChartInterval] = useState<'48h' | '1w' | '1m'>('48h');
+  const [stakedAmount, setStakedAmount] = useState(0);
 
   // Auto-dismiss toast after 3 seconds
   useEffect(() => {
@@ -427,6 +428,30 @@ export function MainWallet() {
       void loadAllBalances();
     }
   }, [selectedAccount?.address, settings.customNetworks]); // Reload if networks change too
+
+  // Fetch staked amount for X1
+  useEffect(() => {
+    let active = true;
+    if (selectedAccount && selectedNetwork?.kind === 'x1') {
+      const fetchStakes = async () => {
+        try {
+          const rpcUrl = getX1RpcUrl(selectedNetwork.id);
+          const connection = new Connection(rpcUrl);
+          const accounts = await getStakeAccountsForWallet(connection, selectedAccount.address);
+          if (active) {
+            const total = accounts.reduce((sum, acc) => sum + acc.balance, 0);
+            setStakedAmount(total);
+          }
+        } catch (e) {
+          console.error('Failed to fetch stakes:', e);
+        }
+      };
+      fetchStakes();
+    } else {
+      setStakedAmount(0);
+    }
+    return () => { active = false; };
+  }, [selectedAccount, selectedNetwork]);
 
   const loadAccounts = async () => {
     const res = await sendMessage<AccountsResponse>({ type: 'manaswap:getAccounts' });
@@ -618,13 +643,16 @@ export function MainWallet() {
       total += amount * tokenPrice;
     });
 
-    // Only add perps value on Solana mainnet
     if (selectedNetwork.id === 'solana-mainnet') {
       total += perpsValue;
     }
 
+    if (selectedNetwork.kind === 'x1') {
+      total += stakedAmount;
+    }
+
     return total;
-  }, [balances, prices, perpsValue, selectedNetwork]);
+  }, [balances, prices, perpsValue, selectedNetwork, stakedAmount]);
 
   // Load Portfolio History
   useEffect(() => {
@@ -1143,6 +1171,34 @@ export function MainWallet() {
     );
   }
 
+  if (view === 'staking' && selectedAccount && selectedNetwork?.kind === 'x1') {
+    return (
+      <StakingPage
+        onBack={() => setView('home')}
+        walletAddress={selectedAccount.address}
+        networkId={selectedNetwork.id}
+        xntBalance={balances.get(selectedNetwork.id)?.solBalance || 0}
+        onSignTransaction={async (transaction, additionalSigners) => {
+          // Sign and send transaction through background
+          const result = await sendMessage<{ success: boolean; signature?: string; error?: string }>({
+            type: 'manaswap:signAndSendRawTransaction',
+            payload: {
+              transaction: Array.from(transaction.serialize({ requireAllSignatures: false })),
+              accountAddress: selectedAccount.address,
+              networkId: selectedNetwork.id,
+              additionalSigners: additionalSigners?.map(k => Array.from(k.secretKey)),
+            }
+          });
+          if (!result.success) {
+            throw new Error(result.error || 'Transaction failed');
+          }
+          return result.signature || '';
+        }}
+        showToast={(message, type) => setToast({ message, type })}
+      />
+    );
+  }
+
   return (
     <>
       {/* Top Bar */}
@@ -1318,6 +1374,31 @@ export function MainWallet() {
             )}
             {/* Portfolio Chart Container */}
             {showChart && <div id="portfolio-chart" style={{ width: '100%', height: '150px', marginTop: '12px', position: 'relative' }} />}
+
+            {/* Staked Amount Display (X1) */}
+            {selectedNetwork?.kind === 'x1' && stakedAmount > 0 && (
+              <div
+                onClick={() => setView('staking')}
+                style={{
+                  marginTop: '12px',
+                  fontSize: '13px',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'rgba(245, 158, 11, 0.1)',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: '1px solid rgba(245, 158, 11, 0.2)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <Icons.Zap size={14} style={{ color: '#f59e0b' }} />
+                <span style={{ fontWeight: 600, color: '#f59e0b' }}>{stakedAmount.toFixed(4)} XNT Staked</span>
+                <Icons.ChevronRight size={14} style={{ color: '#f59e0b', marginLeft: 'auto' }} />
+              </div>
+            )}
           </div>
 
 
@@ -1336,7 +1417,7 @@ export function MainWallet() {
               <div className="action-button-label">Swap</div>
             </div>
             {selectedNetwork?.kind === 'x1' && (
-              <div className="action-button" onClick={() => setShowStakingModal(true)} title="Stake XNT">
+              <div className="action-button" onClick={() => setView('staking')} title="Stake XNT">
                 <div className="action-button-icon"><Icons.Stake /></div>
                 <div className="action-button-label">Stake</div>
               </div>
@@ -1630,32 +1711,7 @@ export function MainWallet() {
         />
       )}
 
-      {showStakingModal && selectedAccount && selectedNetwork?.kind === 'x1' && (
-        <StakingModal
-          isOpen={showStakingModal}
-          onClose={() => setShowStakingModal(false)}
-          walletAddress={selectedAccount.address}
-          networkId={selectedNetwork.id}
-          xntBalance={balances.get(selectedNetwork.id)?.solBalance || 0}
-          onSignTransaction={async (transaction, additionalSigners) => {
-            // Sign and send transaction through background
-            const result = await sendMessage<{ success: boolean; signature?: string; error?: string }>({
-              type: 'manaswap:signAndSendRawTransaction',
-              payload: {
-                transaction: Array.from(transaction.serialize({ requireAllSignatures: false })),
-                accountAddress: selectedAccount.address,
-                networkId: selectedNetwork.id,
-                additionalSigners: additionalSigners?.map(k => Array.from(k.secretKey)),
-              }
-            });
-            if (!result.success) {
-              throw new Error(result.error || 'Transaction failed');
-            }
-            return result.signature || '';
-          }}
-          showToast={(message, type) => setToast({ message, type })}
-        />
-      )}
+
 
       <NetworkModal
         isOpen={showNetworkModal}

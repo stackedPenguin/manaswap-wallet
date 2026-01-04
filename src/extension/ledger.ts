@@ -1,5 +1,4 @@
-import TransportWebHID from "@ledgerhq/hw-transport-webhid";
-import Solana from "@ledgerhq/hw-app-solana";
+// Imports moved to dynamic imports to avoid top-level side effects in background script
 import { PublicKey } from "@solana/web3.js";
 
 export interface LedgerAccount {
@@ -11,6 +10,9 @@ export interface LedgerAccount {
 export async function getLedgerAccounts(pathStart = 0, limit = 5): Promise<LedgerAccount[]> {
     let transport;
     try {
+        const TransportWebHID = (await import("@ledgerhq/hw-transport-webhid")).default;
+        const Solana = (await import("@ledgerhq/hw-app-solana")).default;
+
         transport = await TransportWebHID.create();
         const solana = new Solana(transport);
 
@@ -40,6 +42,9 @@ export async function getLedgerAccounts(pathStart = 0, limit = 5): Promise<Ledge
 export async function signTransactionLedger(derivationPath: string, transaction: Buffer): Promise<Buffer> {
     let transport;
     try {
+        const TransportWebHID = (await import("@ledgerhq/hw-transport-webhid")).default;
+        const Solana = (await import("@ledgerhq/hw-app-solana")).default;
+
         transport = await TransportWebHID.create();
         const solana = new Solana(transport);
 
@@ -58,6 +63,9 @@ export async function signTransactionLedger(derivationPath: string, transaction:
 export async function signMessageLedger(derivationPath: string, message: Buffer): Promise<Buffer> {
     let transport;
     try {
+        const TransportWebHID = (await import("@ledgerhq/hw-transport-webhid")).default;
+        const Solana = (await import("@ledgerhq/hw-app-solana")).default;
+
         transport = await TransportWebHID.create();
         const solana = new Solana(transport);
 

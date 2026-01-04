@@ -89,6 +89,7 @@ import {
   Clock,
   ArrowLeft,
   ChevronDown,
+  ChevronRight,
   ArrowUpRight,
   Wallet,
   Settings,
@@ -99,7 +100,8 @@ import {
   EyeOff,
   Globe,
   ExternalLink,
-  Coins
+  Coins,
+  Zap
 } from 'lucide-react';
 
 // Icon Components
@@ -117,6 +119,7 @@ export const Icons = {
   Clock: (props: any) => <Clock size={18} {...props} />,
   ArrowLeft: (props: any) => <ArrowLeft size={18} {...props} />,
   ChevronDown: (props: any) => <ChevronDown size={14} {...props} />,
+  ChevronRight: (props: any) => <ChevronRight size={14} {...props} />,
   ArrowUpRight: (props: any) => <ArrowUpRight size={14} {...props} />,
   Wallet: (props: any) => <Wallet size={16} {...props} />,
   Settings: (props: any) => <Settings size={14} {...props} />,
@@ -131,5 +134,44 @@ export const Icons = {
   CheckCircle: (props: any) => <CheckCircle size={14} {...props} />,
   ExternalLink: (props: any) => <ExternalLink size={14} {...props} />,
   Stake: (props: any) => <Coins size={20} {...props} />,
+  Zap: (props: any) => <Zap size={16} {...props} />,
 };
+
+interface ToggleProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label?: string;
+}
+
+export function Toggle({ checked, onChange, label }: ToggleProps) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }} onClick={() => onChange(!checked)}>
+      <div
+        style={{
+          width: '36px',
+          height: '20px',
+          backgroundColor: checked ? 'var(--accent-color)' : 'var(--bg-tertiary)',
+          borderRadius: '10px',
+          position: 'relative',
+          transition: 'background-color 0.2s',
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            top: '2px',
+            left: checked ? '18px' : '2px',
+            width: '16px',
+            height: '16px',
+            backgroundColor: 'white',
+            borderRadius: '50%',
+            transition: 'left 0.2s',
+          }}
+        />
+      </div>
+      {label && <span style={{ fontSize: '0.9rem' }}>{label}</span>}
+    </div>
+  );
+}
 

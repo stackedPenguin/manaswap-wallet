@@ -773,3 +773,36 @@ export async function setAccountLabel(address: string, label: string): Promise<v
 
   await saveVault();
 }
+
+export async function deleteAccount(address: string): Promise<void> {
+  if (!keyring) throw new Error('Vault is locked');
+
+  // Count total accounts across all sources
+  const totalAccounts = keyring.sources.reduce((sum, s) => sum + s.accounts.length, 0);
+  if (totalAccounts <= 1) {
+    throw new Error('Cannot delete the last account');
+  }
+
+  let found = false;
+  for (let i = 0; i < keyring.sources.length; i++) {
+    const source = keyring.sources[i];
+    const accountIndex = source.accounts.findIndex(a => a.address === address);
+
+    if (accountIndex !== -1) {
+      found = true;
+
+      // If this is the only account in the source, remove the entire source
+      if (source.accounts.length === 1) {
+        keyring.sources.splice(i, 1);
+      } else {
+        // Just remove the account from the source
+        source.accounts.splice(accountIndex, 1);
+      }
+      break;
+    }
+  }
+
+  if (!found) throw new Error('Account not found');
+
+  await saveVault();
+}

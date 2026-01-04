@@ -28,6 +28,8 @@ export interface ValidatorInfo {
     activatedStake: number;
     lastVote: number;
     credits: number;
+    name?: string;
+    imageUrl?: string;
 }
 
 export interface StakeAccountInfo {
@@ -40,11 +42,20 @@ export interface StakeAccountInfo {
     withdrawAuthority: string;
     activationEpoch: number | null;
     deactivationEpoch: number | null;
+    lastEpochReward: number; // in XNT
 }
 
 // =============================================================================
 // Validator Operations
 // =============================================================================
+
+// Known validators metadata
+const VALIDATOR_METADATA: Record<string, { name: string; imageUrl: string }> = {
+    'X1SPaMUM1A8E1vKL8XQAB5rxKarJbqtWFFSNFs8f7Av': {
+        name: 'X1 Foundation',
+        imageUrl: '/icons/x1-logo.png'
+    }
+};
 
 /**
  * Fetch all active validators from the X1 network
@@ -61,6 +72,7 @@ export async function getValidators(connection: Connection): Promise<ValidatorIn
         credits: v.epochCredits.length > 0
             ? v.epochCredits[v.epochCredits.length - 1][1]
             : 0,
+        ...VALIDATOR_METADATA[v.votePubkey]
     }));
 
     // Sort by activated stake descending
@@ -99,8 +111,27 @@ export async function getStakeAccountsForWallet(
     const results: StakeAccountInfo[] = [];
     const epochInfo = await connection.getEpochInfo();
     const currentEpoch = epochInfo.epoch;
+    const lastEpoch = currentEpoch > 0 ? currentEpoch - 1 : 0;
 
-    for (const account of stakeAccounts) {
+    // Fetch rewards for last epoch
+    // Using import() for type safety if needed, but here simple usage
+    let rewards: (import('@solana/web3.js').InflationReward | null)[] = [];
+    try {
+        const stakePubkeys = stakeAccounts.map(a => a.pubkey);
+        if (stakePubkeys.length > 0) {
+            rewards = await connection.getInflationReward(stakePubkeys, lastEpoch);
+        }
+    } catch (e) {
+        console.warn('[Staking] Failed to fetch rewards:', e);
+        // Fallback to empty rewards
+        rewards = new Array(stakeAccounts.length).fill(null);
+    }
+
+    for (let i = 0; i < stakeAccounts.length; i++) {
+        const account = stakeAccounts[i];
+        const reward = rewards[i];
+        const lastEpochReward = reward ? reward.amount / LAMPORTS_PER_SOL : 0;
+
         try {
             const parsed = await connection.getParsedAccountInfo(account.pubkey);
             if (!parsed.value || !('parsed' in parsed.value.data)) continue;
@@ -124,13 +155,21 @@ export async function getStakeAccountsForWallet(
                 const maxEpoch = 18446744073709551615n;
                 const isDeactivating = BigInt(deactivationEpoch) < maxEpoch;
 
-                if (isDeactivating && deactivationEpoch <= currentEpoch) {
-                    state = 'deactivating';
-                } else if (activationEpoch <= currentEpoch) {
+                if (isDeactivating) {
+                    if (BigInt(deactivationEpoch) <= BigInt(currentEpoch)) {
+                        state = 'inactive';
+                    } else {
+                        state = 'deactivating';
+                        activeStake = parseInt(stake.delegation.stake);
+                    }
+                } else if (activationEpoch < currentEpoch) {
+                    // Fully active if past activation epoch
                     state = 'active';
                     activeStake = parseInt(stake.delegation.stake);
                 } else {
+                    // Activating if current epoch is activation epoch (warmup)
                     state = 'activating';
+                    activeStake = parseInt(stake.delegation.stake);
                 }
             }
 
@@ -144,6 +183,7 @@ export async function getStakeAccountsForWallet(
                 withdrawAuthority: info.meta.authorized.withdrawer,
                 activationEpoch,
                 deactivationEpoch,
+                lastEpochReward,
             });
         } catch (e) {
             console.warn('[Staking] Failed to parse stake account:', account.pubkey.toBase58(), e);

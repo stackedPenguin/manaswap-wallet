@@ -43,6 +43,7 @@ export function SendTransactionModal({
 
   const network = NETWORKS.find((n) => n.id === networkId);
   const currency = token?.symbol || (network?.kind === 'x1' ? 'XNT' : 'SOL');
+  const nativeCurrency = network?.kind === 'x1' ? 'XNT' : 'SOL';
 
   const isValidAddress = (addr: string): boolean => {
     try {
@@ -138,12 +139,13 @@ export function SendTransactionModal({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.95)',
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        backdropFilter: 'blur(4px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 1000,
-        padding: '12px',
+        padding: '16px',
       }}
       onClick={onClose}
     >
@@ -151,14 +153,14 @@ export function SendTransactionModal({
         style={{
           maxWidth: '360px',
           width: '100%',
-          background: '#1a1a2e',
-          borderRadius: '16px',
-          padding: '20px',
+          background: 'var(--bg-secondary)',
+          borderRadius: '24px',
+          padding: '24px',
+          border: '1px solid var(--card-border)',
           maxHeight: '90vh',
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column' as const,
-          minHeight: '400px',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -174,14 +176,17 @@ export function SendTransactionModal({
                 cursor: 'pointer',
                 padding: '4px',
                 fontSize: '0.9rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
               }}
             >
-              ← Back
+              <Icons.ArrowLeft size={16} /> Back
             </button>
           ) : (
             <div style={{ width: '40px' }} />
           )}
-          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '600', color: '#fff' }}>
+          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)' }}>
             {showReview ? 'Confirm' : `Send ${currency}`}
           </h2>
           <button
@@ -190,12 +195,11 @@ export function SendTransactionModal({
               background: 'transparent',
               border: 'none',
               color: 'var(--text-secondary)',
-              fontSize: '1.2rem',
               cursor: 'pointer',
               padding: '4px',
             }}
           >
-            <Icons.Close />
+            <Icons.Close size={18} />
           </button>
         </div>
 
@@ -270,11 +274,19 @@ export function SendTransactionModal({
 
             {/* Fee Info */}
             {feeEstimate && (
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Network fee</span>
-                  <span>~{feeEstimate.toFixed(6)} SOL</span>
-                </div>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: '0.85rem',
+                color: 'var(--text-secondary)',
+                marginBottom: '20px',
+                padding: '12px',
+                background: 'var(--card-bg)',
+                borderRadius: '12px',
+                border: '1px solid var(--card-border)',
+              }}>
+                <span>Network fee</span>
+                <span style={{ color: 'var(--text-primary)' }}>~{feeEstimate.toFixed(6)} {nativeCurrency}</span>
               </div>
             )}
 
@@ -365,17 +377,17 @@ export function SendTransactionModal({
 
             {/* Compact Details */}
             <div style={{ fontSize: '0.85rem', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--card-border)' }}>
                 <span style={{ color: 'var(--text-secondary)' }}>To</span>
-                <span style={{ color: '#fff', fontFamily: 'monospace' }}>{recipient.slice(0, 8)}...{recipient.slice(-6)}</span>
+                <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{recipient.slice(0, 8)}...{recipient.slice(-6)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--card-border)' }}>
                 <span style={{ color: 'var(--text-secondary)' }}>Network</span>
-                <span style={{ color: '#fff' }}>{network?.label}</span>
+                <span style={{ color: 'var(--text-primary)' }}>{network?.label}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0' }}>
                 <span style={{ color: 'var(--text-secondary)' }}>Fee</span>
-                <span style={{ color: '#fff' }}>~{(feeEstimate || 0.000005).toFixed(6)} SOL</span>
+                <span style={{ color: 'var(--text-primary)' }}>~{(feeEstimate || 0.000005).toFixed(6)} {nativeCurrency}</span>
               </div>
             </div>
 

@@ -386,8 +386,14 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
     }, []);
 
     const handleSwitch = async (address: string) => {
-        const acc = accounts.find(a => a.address === address);
-        if (acc) setSelectedAccount(acc);
+        // Select the wallet and persist the selection
+        const res = await sendMessage<{ settings: any }>({ type: 'manaswap:getSettings' });
+        await sendMessage({
+            type: 'manaswap:setSettings',
+            payload: { ...res.settings, selectedAccountAddress: address }
+        });
+        onAccountsChanged?.();
+        onClose(); // Close modal after selection
     };
 
     return (
@@ -404,7 +410,7 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
                     accounts.map(acc => (
                         <div key={acc.address} className="account-item" onClick={() => handleSwitch(acc.address)}>
                             <div className="account-icon">
-                                {acc.type === 'ledger' ? <Icons.Hardware /> : <Icons.Wallet />}
+                                {acc.type === 'ledger' ? <Icons.Hardware size={16} /> : <Icons.Wallet size={16} />}
                             </div>
                             <div className="account-info">
                                 <div className="account-label">{acc.label || 'Wallet'}</div>
@@ -417,7 +423,7 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
                                     e.stopPropagation();
                                     setSelectedAccount(acc);
                                 }}>
-                                    <Icons.Settings />
+                                    <Icons.Settings size={16} />
                                 </button>
                             </div>
                         </div>
@@ -474,6 +480,8 @@ export function AccountDetailsModal({ account, onClose, onSuccess, onAccountsCha
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [showRestoreModal, setShowRestoreModal] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const [isEditing, setIsEditing] = useState(false);
     const [editLabel, setEditLabel] = useState(account.label || '');
@@ -649,13 +657,67 @@ export function AccountDetailsModal({ account, onClose, onSuccess, onAccountsCha
 
                 <div style={{ height: '1px', background: 'var(--card-border)', margin: '20px 0' }} />
 
+                {!showDeleteConfirm ? (
+                    <button
+                        onClick={() => setShowDeleteConfirm(true)}
+                        className="btn-secondary"
+                        style={{ width: '100%', padding: '12px', justifyContent: 'flex-start', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Icons.Close size={16} /> Delete Wallet
+                        </div>
+                    </button>
+                ) : (
+                    <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '12px', padding: '12px' }}>
+                        <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: '#ef4444' }}>
+                            Are you sure? This cannot be undone. Make sure you have backed up your private key.
+                        </p>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                                onClick={() => setShowDeleteConfirm(false)}
+                                className="btn-secondary"
+                                style={{ flex: 1, padding: '8px' }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    setIsDeleting(true);
+                                    try {
+                                        const res = await sendMessage<{ success: boolean; error?: string }>({
+                                            type: 'manaswap:deleteAccount',
+                                            payload: { address: account.address }
+                                        });
+                                        if (res.success) {
+                                            onAccountsChanged?.();
+                                            onClose();
+                                        } else {
+                                            setError(res.error || 'Failed to delete');
+                                            setShowDeleteConfirm(false);
+                                        }
+                                    } catch (e: any) {
+                                        setError(e.message);
+                                        setShowDeleteConfirm(false);
+                                    } finally {
+                                        setIsDeleting(false);
+                                    }
+                                }}
+                                disabled={isDeleting}
+                                style={{ flex: 1, padding: '8px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+                            >
+                                {isDeleting ? 'Deleting...' : 'Delete'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <button
                     onClick={() => setShowRestoreModal(true)}
                     className="btn-secondary"
-                    style={{ width: '100%', padding: '12px', justifyContent: 'flex-start', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                    style={{ width: '100%', padding: '12px', justifyContent: 'flex-start', marginTop: '8px', color: 'var(--text-secondary)' }}
                 >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Icons.Refresh /> Reset / Import Recovery Phrase
+                        <Icons.Refresh size={16} /> Reset / Import Recovery Phrase
                     </div>
                 </button>
 

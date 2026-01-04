@@ -956,7 +956,9 @@ export function DAppApprovalModal({ request, accountAddress, onApprove, onReject
               background: request.type === 'sign-transaction' || request.type === 'sign-and-send-transaction' || request.type === 'sign-all-transactions'
                 ? '#9945FF' // Purple for transactions
                 : 'var(--accent-color)', // Default for connections
-              color: 'white',
+              color: request.type === 'sign-transaction' || request.type === 'sign-and-send-transaction' || request.type === 'sign-all-transactions'
+                ? 'white'
+                : 'black',
               border: 'none',
               borderRadius: '12px',
               padding: '14px 20px',
