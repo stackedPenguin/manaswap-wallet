@@ -95,13 +95,27 @@ export function StakingPage({
         );
     }, [validators, searchQuery]);
 
-    // Default Validator Selection
+    // Check for existing active stakes to enforce "Unstake to Change" policy
+    const activeStake = useMemo(() => {
+        return stakeAccounts.find(s => ['active', 'activating'].includes(s.state));
+    }, [stakeAccounts]);
+
+    const lockedValidator = activeStake?.delegatedVoteAccount;
+
+    // Default Validator Selection & Locking
     useEffect(() => {
+        if (lockedValidator) {
+            if (selectedValidator !== lockedValidator) {
+                setSelectedValidator(lockedValidator);
+            }
+            return;
+        }
+
         if (!loadingData && validators.length > 0 && !selectedValidator) {
             const defaultVal = validators.find(v => v.voteAccount === DEFAULT_VALIDATOR_ADDRESS);
             setSelectedValidator(defaultVal ? defaultVal.voteAccount : validators[0].voteAccount);
         }
-    }, [loadingData, validators, selectedValidator]);
+    }, [loadingData, validators, selectedValidator, lockedValidator]);
 
     // Format stake for display
     const formatStake = (lamports: number) => {
@@ -267,7 +281,6 @@ export function StakingPage({
                     {/* Collapsed View */}
                     {!showValidatorList ? (
                         <div
-                            onClick={() => setShowValidatorList(true)}
                             style={{
                                 display: 'flex',
                                 alignItems: 'center',
@@ -276,7 +289,15 @@ export function StakingPage({
                                 background: 'var(--surface-light)',
                                 border: '1px solid var(--card-border)',
                                 borderRadius: '10px',
-                                cursor: 'pointer'
+                                cursor: lockedValidator ? 'default' : 'pointer',
+                                opacity: lockedValidator ? 0.8 : 1
+                            }}
+                            onClick={() => {
+                                if (lockedValidator) {
+                                    showToast('Unstake current validator to switch', 'info');
+                                    return;
+                                }
+                                setShowValidatorList(true);
                             }}
                         >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -299,8 +320,12 @@ export function StakingPage({
                                     </div>
                                 </div>
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--primary)' }}>
-                                Change <Icons.ChevronDown size={12} />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: lockedValidator ? 'var(--text-secondary)' : 'var(--primary)' }}>
+                                {lockedValidator ? (
+                                    <>Locked <Icons.Lock size={12} /></>
+                                ) : (
+                                    <>Change <Icons.ChevronDown size={12} /></>
+                                )}
                             </div>
                         </div>
                     ) : (
