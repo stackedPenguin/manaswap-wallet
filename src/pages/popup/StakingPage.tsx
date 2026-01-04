@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { Icons } from '../../shared/ui';
+import { Icons, Identicon } from '../../shared/ui';
 import {
     getValidators,
     getStakeAccountsForWallet,
@@ -43,6 +43,7 @@ export function StakingPage({
     const [loading, setLoading] = useState(false);
     const [loadingData, setLoadingData] = useState(true);
     const [showValidatorList, setShowValidatorList] = useState(false); // Expanded/Collapsed Validator View
+    const [searchQuery, setSearchQuery] = useState('');
     const [remainingEpochTime, setRemainingEpochTime] = useState<string | null>(null);
     const [epochProgress, setEpochProgress] = useState<{ current: number, total: number, percent: number, epoch: number } | null>(null);
     const [expandedStakeId, setExpandedStakeId] = useState<string | null>(null); // For accordion
@@ -84,6 +85,15 @@ export function StakingPage({
     useEffect(() => {
         loadData();
     }, [loadData]);
+
+    const filteredValidators = useMemo(() => {
+        if (!searchQuery) return validators;
+        const lower = searchQuery.toLowerCase();
+        return validators.filter(v =>
+            (v.name && v.name.toLowerCase().includes(lower)) ||
+            v.voteAccount.toLowerCase().includes(lower)
+        );
+    }, [validators, searchQuery]);
 
     // Default Validator Selection
     useEffect(() => {
@@ -264,12 +274,16 @@ export function StakingPage({
                             }}
                         >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <div style={{
-                                    width: '24px', height: '24px', borderRadius: '50%',
-                                    background: 'var(--primary-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                }}>
-                                    <Icons.Zap size={14} style={{ color: 'var(--primary)' }} />
-                                </div>
+                                {selectedValidator ? (
+                                    <Identicon address={selectedValidator} size={24} />
+                                ) : (
+                                    <div style={{
+                                        width: '24px', height: '24px', borderRadius: '50%',
+                                        background: 'var(--primary-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                    }}>
+                                        <Icons.Zap size={14} style={{ color: 'var(--primary)' }} />
+                                    </div>
+                                )}
                                 <div>
                                     <div style={{ fontSize: '13px', fontWeight: 500 }}>
                                         {selectedValidator ? getValidatorName(selectedValidator) : 'Select Validator'}
@@ -291,14 +305,35 @@ export function StakingPage({
                             borderRadius: '10px',
                             overflow: 'hidden'
                         }}>
-                            <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '12px', fontWeight: 600 }}>Select Validator</span>
-                                <button onClick={() => setShowValidatorList(false)} style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
-                                    <Icons.X size={14} />
-                                </button>
+                            <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--card-border)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                    <span style={{ fontSize: '12px', fontWeight: 600 }}>Select Validator</span>
+                                    <button onClick={() => setShowValidatorList(false)} style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
+                                        <Icons.X size={14} />
+                                    </button>
+                                </div>
+                                <div style={{ position: 'relative' }}>
+                                    <Icons.Search size={12} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        placeholder="Search validator..."
+                                        style={{
+                                            width: '100%',
+                                            padding: '6px 8px 6px 28px',
+                                            borderRadius: '6px',
+                                            border: '1px solid var(--card-border)',
+                                            background: 'var(--bg-primary)',
+                                            color: 'var(--text-primary)',
+                                            fontSize: '11px',
+                                            outline: 'none'
+                                        }}
+                                    />
+                                </div>
                             </div>
-                            <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
-                                {validators.map(v => (
+                            <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                                {filteredValidators.map(v => (
                                     <div
                                         key={v.voteAccount}
                                         onClick={() => { setSelectedValidator(v.voteAccount); setShowValidatorList(false); }}
@@ -311,6 +346,7 @@ export function StakingPage({
                                             gap: '8px'
                                         }}
                                     >
+                                        <Identicon address={v.voteAccount} size={24} />
                                         <div style={{ flex: 1 }}>
                                             <div style={{ fontSize: '13px' }}>{v.name || `${v.voteAccount.slice(0, 6)}...`}</div>
                                             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>

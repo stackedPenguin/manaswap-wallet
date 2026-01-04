@@ -101,7 +101,9 @@ import {
   Globe,
   ExternalLink,
   Coins,
-  Zap
+  Zap,
+  Search,
+
 } from 'lucide-react';
 
 // Icon Components
@@ -135,6 +137,7 @@ export const Icons = {
   ExternalLink: (props: any) => <ExternalLink size={14} {...props} />,
   Stake: (props: any) => <Coins size={20} {...props} />,
   Zap: (props: any) => <Zap size={16} {...props} />,
+  Search: (props: any) => <Search size={16} {...props} />,
 };
 
 interface ToggleProps {
@@ -171,6 +174,34 @@ export function Toggle({ checked, onChange, label }: ToggleProps) {
         />
       </div>
       {label && <span style={{ fontSize: '0.9rem' }}>{label}</span>}
+    </div>
+  );
+}
+
+export function Identicon({ address, size = 24, className = '' }: { address: string; size?: number; className?: string }) {
+  // Simple deterministic color generation
+  const hash = address.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
+  const hue = Math.abs(hash % 360);
+  const color = `hsl(${hue}, 70%, 60%)`;
+
+  return (
+    <div
+      className={className}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        backgroundColor: color,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'white',
+        fontWeight: 'bold',
+        fontSize: size * 0.5,
+        border: '1px solid rgba(255,255,255,0.2)'
+      }}
+    >
+      {address.slice(0, 1).toUpperCase()}
     </div>
   );
 }
