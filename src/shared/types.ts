@@ -103,6 +103,7 @@ interface PendingRequestBase {
   timestamp: number;
   icon?: string;
   publicKey?: string; // User's wallet address for Blowfish simulation
+  networkId?: NetworkClusterId; // Network context for the request
 }
 
 // Discriminated union for pending requests with typed payloads

@@ -33,11 +33,11 @@ export async function fetchAccountBalance(
   customNetworks: NetworkConfig[] = []
 ): Promise<AccountBalance> {
   const config = getNetworkConfig(networkId, customNetworks);
-  console.log('[Balances] Fetching balance for', address, 'on', networkId, 'RPC:', config.rpcUrl);
+  // console.log('[Balances] Fetching balance for', address, 'on', networkId, 'RPC:', config.rpcUrl);
   const connection = new Connection(config.rpcUrl, 'confirmed');
 
   const solBalance = await connection.getBalance(new PublicKey(address));
-  console.log('[Balances] Raw lamports for', networkId, ':', solBalance, '= SOL:', solBalance / LAMPORTS_PER_SOL);
+  // console.log('[Balances] Raw lamports for', networkId, ':', solBalance, '= SOL:', solBalance / LAMPORTS_PER_SOL);
 
   const tokens = await fetchUserTokens(connection, address);
 

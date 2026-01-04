@@ -246,7 +246,7 @@ async function getCachedTxData(address: string, networkId: string): Promise<{ si
         const cache = result[key] as { signatures: string[]; changes: BalanceChange[]; lastUpdated: number } | undefined;
 
         if (cache && (Date.now() - cache.lastUpdated) < TX_CACHE_MAX_AGE) {
-            console.log(`[TxCache] Hit for ${networkId}: ${cache.signatures.length} known signatures`);
+            // console.log(`[TxCache] Hit for ${networkId}: ${cache.signatures.length} known signatures`);
             return {
                 signatures: new Set(cache.signatures),
                 changes: cache.changes || []
@@ -268,7 +268,7 @@ async function saveCachedTxData(address: string, networkId: string, signatures: 
                 lastUpdated: Date.now()
             }
         });
-        console.log(`[TxCache] Saved ${signatures.size} signatures for ${networkId}`);
+        // console.log(`[TxCache] Saved ${signatures.size} signatures for ${networkId}`);
     } catch (e) {
         console.error('[TxCache] Save failed:', e);
     }
@@ -311,7 +311,7 @@ export async function fetchBalanceChanges(
         for (const tx of data) {
             // Stop at first known signature
             if (knownSigs.has(tx.signature)) {
-                console.log(`[SolanaHistory] Hit known sig, stopping. Processed ${newChanges.length} new changes`);
+                // console.log(`[SolanaHistory] Hit known sig, stopping. Processed ${newChanges.length} new changes`);
                 break;
             }
 
@@ -375,7 +375,7 @@ async function fetchX1BalanceChanges(
             ? 'https://rpc.mainnet.x1.xyz'
             : 'https://rpc.testnet.x1.xyz';
 
-        console.log(`[X1History] Fetching balance changes for ${address} on ${networkId}`);
+        // console.log(`[X1History] Fetching balance changes for ${address} on ${networkId}`);
 
         // Load cached data
         const cached = await getCachedTxData(address, networkId);
@@ -384,7 +384,7 @@ async function fetchX1BalanceChanges(
 
         // If we have cached data, return it quickly
         if (cachedChanges.length > 0) {
-            console.log(`[X1History] Returning ${cachedChanges.length} cached changes`);
+            // console.log(`[X1History] Returning ${cachedChanges.length} cached changes`);
         }
 
         const newChanges: BalanceChange[] = [];
@@ -416,14 +416,14 @@ async function fetchX1BalanceChanges(
 
             if (signatures.length === 0) break;
 
-            console.log(`[X1History] Page ${pagesChecked + 1}: Checking ${signatures.length} signatures...`);
+            // console.log(`[X1History] Page ${pagesChecked + 1}: Checking ${signatures.length} signatures...`);
             beforeSig = signatures[signatures.length - 1]?.signature;
             pagesChecked++;
 
             for (const sig of signatures) {
                 // Stop at first known signature (we already processed everything after this)
                 if (knownSigs.has(sig.signature)) {
-                    console.log(`[X1History] Hit known sig, stopping. Found ${newChanges.length} new changes`);
+                    // console.log(`[X1History] Hit known sig, stopping. Found ${newChanges.length} new changes`);
                     hitKnownSig = true;
                     break;
                 }
@@ -451,7 +451,7 @@ async function fetchX1BalanceChanges(
 
                         if (txResponse.status === 429) {
                             const backoffMs = 500 * (retry + 1);
-                            console.log(`[X1History] Rate limited, waiting ${backoffMs}ms...`);
+                            // console.log(`[X1History] Rate limited, waiting ${backoffMs}ms...`);
                             await new Promise(resolve => setTimeout(resolve, backoffMs));
                             continue;
                         }
@@ -485,7 +485,7 @@ async function fetchX1BalanceChanges(
                                     amount: diff,
                                     signature: sig.signature
                                 });
-                                console.log(`[X1History] Found: ${diff > 0 ? '+' : ''}${diff.toFixed(4)} XNT`);
+                                // console.log(`[X1History] Found: ${diff > 0 ? '+' : ''}${diff.toFixed(4)} XNT`);
                             }
                             break;
                         }
@@ -502,7 +502,7 @@ async function fetchX1BalanceChanges(
         // Save updated cache
         await saveCachedTxData(address, networkId, allSigs, allChanges);
 
-        console.log(`[X1History] Total: ${allChanges.length} changes (${newChanges.length} new + ${cachedChanges.length} cached)`);
+        // console.log(`[X1History] Total: ${allChanges.length} changes (${newChanges.length} new + ${cachedChanges.length} cached)`);
         return allChanges.sort((a, b) => b.timestamp - a.timestamp);
 
     } catch (error) {

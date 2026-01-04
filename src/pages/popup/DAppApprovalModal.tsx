@@ -445,7 +445,7 @@ export function DAppApprovalModal({ request, accountAddress, onApprove, onReject
 
   // Blowfish simulation hook
   const { isLoading: blowfishLoading, error: blowfishError, evaluation } =
-    useBlowfishEvaluation(transactionBase64, userAccount, request.origin);
+    useBlowfishEvaluation(transactionBase64, userAccount, request.origin, request.networkId);
 
   const handleApprove = async () => {
     setIsProcessing(true);

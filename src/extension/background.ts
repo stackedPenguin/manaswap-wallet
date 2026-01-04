@@ -216,7 +216,7 @@ async function trackPortfolioValue() {
         value: totalValue
       });
 
-      console.log('[Background] Portfolio value tracked:', totalValue);
+      // console.log('[Background] Portfolio value tracked:', totalValue);
 
     } catch (e) {
       console.error('[Background] Failed to track portfolio value', e);
@@ -264,39 +264,60 @@ async function checkAllNetworksHealth() {
   });
 }
 
+let isPopupOpening = false;
+
+// Helper to open the extension popup
 // Helper to open the extension popup
 async function openPopup() {
+  // Check if any popup window is already open (native or fallback)
+  // This is critical because getViews({ type: 'popup' }) only returns native popups
+  try {
+    const windows = await chrome.windows.getAll({ populate: true });
+    const popupUrl = chrome.runtime.getURL('src/pages/popup/index.html');
+    const existingPopup = windows.find(w =>
+      w.tabs?.some(t => t.url?.includes(popupUrl))
+    );
+
+    if (existingPopup || isPopupOpening) {
+      if (existingPopup?.id) {
+        await chrome.windows.update(existingPopup.id, { focused: true });
+      }
+      return;
+    }
+  } catch (err) {
+    console.debug('[Manaswap] Failed to check existing windows', err);
+  }
+
+  isPopupOpening = true;
   try {
     // Try to open the extension popup directly (cleaner UI)
-    // This works in newer browsers if triggered by a user gesture
     try {
       // @ts-ignore - openPopup is available in Chrome 99+
       await chrome.action.openPopup();
+      isPopupOpening = false;
       return;
-    } catch (e) {
-      // Fallback if not supported or no user gesture
+    } catch (e: any) {
+      // If the popup is already open, openPopup throws an error.
+      if (e.message && (e.message.includes('already open') || e.message.includes('Extension popup'))) {
+        isPopupOpening = false;
+        return;
+      }
       console.debug('chrome.action.openPopup failed, falling back to window', e);
     }
 
-    // Check if a popup is already open
-    const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['popup'] });
-    const existingPopup = windows.find(w => {
-      return w.tabs?.some(t => t.url?.includes(chrome.runtime.getURL('src/pages/popup/index.html')));
+    // Fallback to creating a new window
+    await chrome.windows.create({
+      url: 'src/pages/popup/index.html',
+      type: 'popup',
+      width: 360,
+      height: 600,
+      focused: true,
     });
-
-    if (existingPopup && existingPopup.id) {
-      await chrome.windows.update(existingPopup.id, { focused: true });
-    } else {
-      await chrome.windows.create({
-        url: 'src/pages/popup/index.html',
-        type: 'popup',
-        width: 360,
-        height: 600,
-        focused: true,
-      });
-    }
   } catch (error) {
     console.error('[Manaswap] Failed to open popup', error);
+  } finally {
+    // Reset lock
+    setTimeout(() => { isPopupOpening = false; }, 1000);
   }
 }
 
@@ -510,14 +531,14 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       case 'manaswap:getBalance':
       case 'manaswap:refreshBalance': {
         try {
-          console.log('[Background] Received getBalance request for', message.payload.address, 'network:', message.payload.networkId);
+          // console.log('[Background] Received getBalance request for', message.payload.address, 'network:', message.payload.networkId);
           const settings = await readSettings();
           const balance = await fetchAccountBalance(
             message.payload.address,
             message.payload.networkId,
             settings.customNetworks || []
           );
-          console.log('[Background] Balance for', message.payload.networkId, ':', balance.solBalance, 'tokens:', balance.tokens.length);
+          // console.log('[Background] Balance for', message.payload.networkId, ':', balance.solBalance, 'tokens:', balance.tokens.length);
           sendResponse({ success: true, balance });
         } catch (e: any) {
           console.error('[Background] Failed to fetch balance', e);
@@ -655,6 +676,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
         try {
           const hostname = normalizeHostname(message.payload.hostname);
           const origin = message.payload.origin;
+          const settings = await readSettings();
           console.log('[dAppConnect] Connecting from:', origin);
 
           // Check if already has permission
@@ -663,7 +685,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
 
           if (existingIndex !== -1) {
             // Get currently selected account
-            const settings = await readSettings();
+            // const settings = await readSettings();
             console.log('[dAppConnect] Settings selectedAccountAddress:', settings.selectedAccountAddress);
 
             // Check vault state first
@@ -745,6 +767,9 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             hostname,
             icon: message.payload.icon,
             timestamp: Date.now(),
+            networkId: (hostname?.includes('.x1.xyz') && !settings.selectedNetwork.startsWith('x1-'))
+              ? (hostname.includes('staging') || hostname.includes('test') ? 'x1-testnet' : 'x1-mainnet')
+              : settings.selectedNetwork,
           };
           pendingRequests.set(requestId, request);
 
@@ -798,6 +823,18 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           const settings = await readSettings();
           const selectedAccountAddress = settings.selectedAccountAddress;
 
+          // Network override logic
+          const targetNetworkId = (permission.hostname?.includes('.x1.xyz') && !settings.selectedNetwork.startsWith('x1-'))
+            ? (permission.hostname.includes('staging') || permission.hostname.includes('test') ? 'x1-testnet' : 'x1-mainnet')
+            : settings.selectedNetwork;
+
+          console.log('[dappSign] Network override evaluation:', {
+            hostname: permission.hostname,
+            currentSettingsNetwork: settings.selectedNetwork,
+            resolvedNetworkId: targetNetworkId,
+            origin: origin
+          });
+
           let request: PendingRequest;
           const baseRequest = {
             id: requestId,
@@ -805,6 +842,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             hostname: permission.hostname,
             timestamp: Date.now(),
             publicKey: selectedAccountAddress, // For Blowfish simulation
+            networkId: targetNetworkId,
           };
 
           // Check if selected account is a Ledger account (settings already fetched above)
@@ -834,7 +872,18 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
               request = { ...baseRequest, type: 'sign-and-send-transaction', payload: signSendPayload.transaction, options: signSendPayload.options };
             }
           } else {
-            const msgPayload = Array.from((message.payload as { message: Uint8Array }).message);
+            const rawMsg = (message.payload as { message: any }).message;
+            console.log('[dappSign] Raw message payload type:', typeof rawMsg, 'isArray:', Array.isArray(rawMsg), 'value:', rawMsg);
+
+            // Handle array-like object serialization from Chrome messaging
+            const msgPayload = Array.isArray(rawMsg)
+              ? rawMsg
+              : (rawMsg && typeof rawMsg === 'object')
+                ? Object.values(rawMsg)
+                : Array.from(rawMsg);
+
+            console.log('[dappSign] Parsed message payload length:', msgPayload.length);
+
             if (isLedgerAccount) {
               request = { ...baseRequest, type: 'ledger-sign-message', payload: msgPayload, derivationPath };
             } else {

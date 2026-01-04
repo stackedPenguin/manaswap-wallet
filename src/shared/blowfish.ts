@@ -77,9 +77,19 @@ interface SimulateTransactionResponse {
 
 const REQUEST_TIMEOUT = 10000;
 
-// Get Helius RPC URL from stored settings or env
-async function getHeliusRpcUrl(): Promise<string | null> {
+import { getNetworkConfig, type NetworkClusterId } from './networks';
+
+// Get RPC URL for simulation based on network
+async function getSimulationRpcUrl(networkId?: NetworkClusterId): Promise<string | null> {
     try {
+        // If it's an X1 network, use its specific RPC
+        if (networkId && (networkId.toString().startsWith('x1-') || networkId === 'x1-testnet' || networkId === 'x1-mainnet')) {
+            const config = getNetworkConfig(networkId);
+            console.log('[Simulation] Using X1 RPC for network:', networkId);
+            return config.rpcUrl;
+        }
+
+        // For Solana networks, prefer Helius if API key is present
         // First try Vite env variable
         const apiKey = (import.meta as any)?.env?.VITE_HELIUS_API_KEY;
         if (apiKey) {
@@ -100,9 +110,15 @@ async function getHeliusRpcUrl(): Promise<string | null> {
             }
         }
 
+        // If no Helius key, fall back to standard Solana RPC if it's a Solana network request
+        if (networkId && networkId.toString().startsWith('solana-')) {
+            const config = getNetworkConfig(networkId);
+            return config.rpcUrl;
+        }
+
         return null;
     } catch (e) {
-        console.error('[Simulation] Failed to get Helius RPC URL:', e);
+        console.error('[Simulation] Failed to get RPC URL:', e);
         return null;
     }
 }
@@ -110,7 +126,8 @@ async function getHeliusRpcUrl(): Promise<string | null> {
 export function useBlowfishEvaluation(
     transactionBase64: string | null,
     userAccount: string | null,
-    origin: string | null
+    origin: string | null,
+    networkId?: NetworkClusterId
 ): BlowfishResult {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<Error | null>(null);
@@ -120,7 +137,8 @@ export function useBlowfishEvaluation(
         console.log('[Simulation] fetchEvaluation called', {
             hasTransaction: !!transactionBase64,
             hasUserAccount: !!userAccount,
-            origin
+            origin,
+            networkId
         });
 
         if (!transactionBase64 || !userAccount) {
@@ -132,9 +150,14 @@ export function useBlowfishEvaluation(
         setError(null);
 
         try {
-            const rpcUrl = await getHeliusRpcUrl();
+            const rpcUrl = await getSimulationRpcUrl(networkId);
 
             if (!rpcUrl) {
+                // If it's X1, we should have found an RPC. If not, maybe just no Helius for Solana.
+                // But for X1 we *need* an RPC.
+                if (networkId && networkId.toString().startsWith('x1-')) {
+                    throw new Error(`No RPC URL found for network: ${networkId}`);
+                }
                 throw new Error('Helius API key not configured. Add VITE_HELIUS_API_KEY to .env');
             }
 
@@ -227,10 +250,11 @@ export function useBlowfishEvaluation(
             } else {
                 setError(err instanceof Error ? err : new Error('Unknown error'));
             }
-        } finally {
+        }
+        finally {
             setIsLoading(false);
         }
-    }, [transactionBase64, userAccount, origin]);
+    }, [transactionBase64, userAccount, origin, networkId]);
 
     useEffect(() => {
         fetchEvaluation();

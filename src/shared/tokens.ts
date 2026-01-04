@@ -80,11 +80,11 @@ export async function fetchTokenMetadataMap(): Promise<Map<string, JupiterToken>
 
     // 1. Try Jupiter API
     try {
-        console.log('Fetching tokens from Jupiter API...');
+        // console.log('Fetching tokens from Jupiter API...');
         const response = await fetchWithTimeout(JUPITER_TOKEN_LIST_URL);
         if (response.ok) {
             tokens = await response.json();
-            console.log(`Loaded ${tokens.length} tokens from Jupiter`);
+            // console.log(`Loaded ${tokens.length} tokens from Jupiter`);
         } else {
             throw new Error(`Jupiter API returned ${response.status}`);
         }
@@ -98,7 +98,7 @@ export async function fetchTokenMetadataMap(): Promise<Map<string, JupiterToken>
                 const data = await response.json();
                 // Solana Labs list structure is { tokens: [...] }
                 tokens = Array.isArray(data) ? data : (data.tokens || []);
-                console.log(`Loaded ${tokens.length} tokens from Solana Labs`);
+                // console.log(`Loaded ${tokens.length} tokens from Solana Labs`);
             } else {
                 throw new Error(`Solana Labs API returned ${response.status}`);
             }
@@ -150,7 +150,7 @@ async function fetchHeliusMetadata(mint: string): Promise<JupiterToken | null> {
     if (!rpcUrl || !rpcUrl.includes('helius')) return null;
 
     try {
-        console.log(`[Tokens] Fetching Helius DAS metadata for ${mint}`);
+        // console.log(`[Tokens] Fetching Helius DAS metadata for ${mint}`);
         const response = await fetch(rpcUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -169,7 +169,7 @@ async function fetchHeliusMetadata(mint: string): Promise<JupiterToken | null> {
             const symbol = content.metadata?.symbol || 'Unknown';
             const logoURI = content.links?.image || '';
 
-            console.log(`[Tokens] Helius DAS found: ${symbol} - ${name}`);
+            // console.log(`[Tokens] Helius DAS found: ${symbol} - ${name}`);
 
             return {
                 address: mint,
@@ -203,10 +203,10 @@ async function fetchOnChainMetadata(connection: Connection, mint: string): Promi
             METADATA_PROGRAM_ID
         );
 
-        console.log(`[Tokens] Fetching on-chain metadata for ${mint} at PDA ${pda.toBase58()}`);
+        // console.log(`[Tokens] Fetching on-chain metadata for ${mint} at PDA ${pda.toBase58()}`);
         const accountInfo = await connection.getAccountInfo(pda);
         if (!accountInfo) {
-            console.log(`[Tokens] No metadata account found for ${mint}`);
+            // console.log(`[Tokens] No metadata account found for ${mint}`);
             return null;
         }
 
@@ -226,17 +226,17 @@ async function fetchOnChainMetadata(connection: Connection, mint: string): Promi
         const symbol = readString();
         const uri = readString();
 
-        console.log(`[Tokens] Parsed on-chain metadata for ${mint}: Symbol=${symbol}, Name=${name}, URI=${uri}`);
+        // console.log(`[Tokens] Parsed on-chain metadata for ${mint}: Symbol=${symbol}, Name=${name}, URI=${uri}`);
 
         let logoURI = '';
         if (uri) {
             try {
-                console.log(`[Tokens] Fetching metadata JSON from ${uri}`);
+                // console.log(`[Tokens] Fetching metadata JSON from ${uri}`);
                 const response = await fetchWithTimeout(uri);
                 if (response.ok) {
                     const json = await response.json();
                     logoURI = json.image || '';
-                    console.log(`[Tokens] Found logo URI for ${mint}: ${logoURI}`);
+                    // console.log(`[Tokens] Found logo URI for ${mint}: ${logoURI}`);
                 } else {
                     console.warn(`[Tokens] Failed to fetch URI ${uri}: ${response.status}`);
                 }
@@ -274,7 +274,7 @@ export async function fetchUserTokens(connection: Connection, publicKey: string)
             )
         ]);
 
-        console.log(`[Tokens] Found ${splAccounts.value.length} SPL accounts and ${token2022Accounts.value.length} Token-2022 accounts`);
+        // console.log(`[Tokens] Found ${splAccounts.value.length} SPL accounts and ${token2022Accounts.value.length} Token-2022 accounts`);
 
         const allAccounts = [...splAccounts.value, ...token2022Accounts.value];
 
@@ -324,7 +324,7 @@ export async function fetchUserTokens(connection: Connection, publicKey: string)
 
         const tokens = rawTokens.filter((t): t is TokenBalance => t !== null);
 
-        console.log(`[Tokens] Returning ${tokens.length} tokens with non-zero balance`);
+        // console.log(`[Tokens] Returning ${tokens.length} tokens with non-zero balance`);
         return tokens;
     } catch (error) {
         console.error('Error fetching user tokens:', error);

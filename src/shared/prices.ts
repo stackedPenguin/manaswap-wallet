@@ -63,7 +63,7 @@ async function fetchDexScreenerPrices(mints: string[]): Promise<Map<string, numb
     const url = `${DEXSCREENER_API_URL}/${ids}`;
 
     try {
-        console.log(`[Prices] Fetching prices from DexScreener: ${url}`);
+        // console.log(`[Prices] Fetching prices from DexScreener: ${url}`);
         const response = await fetch(url, { cache: 'no-store' });
         if (!response.ok) {
             throw new Error(`DexScreener API error: ${response.status}`);
@@ -95,7 +95,7 @@ async function fetchDexScreenerPrices(mints: string[]): Promise<Map<string, numb
             }
         });
 
-        console.log(`[Prices] Parsed ${priceMap.size} prices from DexScreener`);
+        // console.log(`[Prices] Parsed ${priceMap.size} prices from DexScreener`);
         return priceMap;
     } catch (error) {
         console.error('Failed to fetch DexScreener prices:', error);
@@ -112,7 +112,7 @@ async function fetchJupiterPrices(mints: string[]): Promise<Map<string, number>>
     const url = `${JUPITER_PRICE_API_V3_URL}?ids=${ids}&vsToken=USDC`;
 
     try {
-        console.log(`[Prices] Fetching prices from Jupiter API v3: ${url}`);
+        // console.log(`[Prices] Fetching prices from Jupiter API v3: ${url}`);
 
         const apiKey = import.meta.env.VITE_JUPITER_ULTRA_API_KEY;
         const headers: HeadersInit = {};
@@ -148,7 +148,7 @@ async function fetchJupiterPrices(mints: string[]): Promise<Map<string, number>>
             });
         }
 
-        console.log(`[Prices] Parsed ${priceMap.size} prices from Jupiter API v3`);
+        // console.log(`[Prices] Parsed ${priceMap.size} prices from Jupiter API v3`);
         return priceMap;
     } catch (error) {
         console.error('Failed to fetch Jupiter prices:', error);
@@ -170,7 +170,7 @@ export async function fetchTokenPrices(mints: string[]): Promise<Map<string, num
         return jupiterPrices;
     }
 
-    console.log(`[Prices] ${missingMints.length} tokens missing from Jupiter, trying DexScreener fallback...`);
+    // console.log(`[Prices] ${missingMints.length} tokens missing from Jupiter, trying DexScreener fallback...`);
 
     // 2. Try DexScreener as fallback (Good for new/obscure tokens)
     const dexScreenerPrices = await fetchDexScreenerPrices(missingMints);

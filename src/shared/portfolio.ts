@@ -40,9 +40,9 @@ export async function calculateHistoricalPortfolio(
 ): Promise<PortfolioDataPoint[]> {
     // We need to track history even if current assets are empty, provided we have balance changes.
     // But if both are empty, return empty.
-    console.log('[PortfolioDebug] === Starting calculateHistoricalPortfolio ===');
-    console.log('[PortfolioDebug] Current Assets:', JSON.stringify(currentAssets.map(a => ({ mint: a.mint.slice(0, 8), amount: a.amount, value: a.value }))));
-    console.log('[PortfolioDebug] Balance Changes:', balanceChanges.length);
+    // console.log('[PortfolioDebug] === Starting calculateHistoricalPortfolio ===');
+    // console.log('[PortfolioDebug] Current Assets:', JSON.stringify(currentAssets.map(a => ({ mint: a.mint.slice(0, 8), amount: a.amount, value: a.value }))));
+    // console.log('[PortfolioDebug] Balance Changes:', balanceChanges.length);
 
     if (currentAssets.length === 0 && balanceChanges.length === 0) return [];
 
@@ -68,7 +68,7 @@ export async function calculateHistoricalPortfolio(
 
     if (significantMints.size === 0) return [];
 
-    console.log('[PortfolioDebug] Significant Mints:', Array.from(significantMints).map(m => m.slice(0, 8)));
+    // console.log('[PortfolioDebug] Significant Mints:', Array.from(significantMints).map(m => m.slice(0, 8)));
 
     // 2. Fetch OHLC for each asset
     // GeckoTerminal rate limit is ~30/min. 
@@ -124,7 +124,7 @@ export async function calculateHistoricalPortfolio(
                     });
                 }
                 priceHistoryMap.set(mint, syntheticPrices.reverse());
-                console.log(`[PortfolioDebug] Using fixed price $${FIXED_PRICE_TOKENS[mint]} for ${mint}`);
+                // console.log(`[PortfolioDebug] Using fixed price $${FIXED_PRICE_TOKENS[mint]} for ${mint}`);
                 return;
             }
 
@@ -162,12 +162,12 @@ export async function calculateHistoricalPortfolio(
     // Convert Set to Array
     await Promise.all(Array.from(significantMints).map(processAsset));
 
-    console.log('[PortfolioDebug] Price History Map:');
-    priceHistoryMap.forEach((prices, mint) => {
-        const latestPrice = prices[prices.length - 1]?.price;
-        const fallbackPrice = currentPrices.get(mint);
-        console.log(`  ${mint.slice(0, 8)}: ${prices.length} prices, latest: $${latestPrice?.toFixed(2) || 'N/A'}${latestPrice === 0 && fallbackPrice ? ` (fallback: $${fallbackPrice.toFixed(4)})` : ''}`);
-    });
+    // console.log('[PortfolioDebug] Price History Map:');
+    // priceHistoryMap.forEach((prices, mint) => {
+    //     // const latestPrice = prices[prices.length - 1]?.price;
+    //     // const fallbackPrice = currentPrices.get(mint);
+    //     // console.log(`  ${mint.slice(0, 8)}: ${prices.length} prices, latest: $${latestPrice?.toFixed(2) || 'N/A'}${latestPrice === 0 && fallbackPrice ? ` (fallback: $${fallbackPrice.toFixed(4)})` : ''}`);
+    // });
 
     // 3. Replay History
     // We start from NOW and go BACKWARDS
@@ -199,7 +199,7 @@ export async function calculateHistoricalPortfolio(
 
             if (priceToUse > 0) {
                 amount = a.value / priceToUse;
-                console.log(`[PortfolioDebug] Estimated amount for ${mint.slice(0, 8)}: ${amount.toFixed(4)} (value: $${a.value.toFixed(2)}, price: $${priceToUse.toFixed(2)})`);
+                // console.log(`[PortfolioDebug] Estimated amount for ${mint.slice(0, 8)}: ${amount.toFixed(4)} (value: $${a.value.toFixed(2)}, price: $${priceToUse.toFixed(2)})`);
             }
         }
 
@@ -207,10 +207,10 @@ export async function calculateHistoricalPortfolio(
         currentHoldings.set(mint, currentAmount + amount);
     });
 
-    console.log('[PortfolioDebug] Initial Holdings (from currentAssets):');
-    currentHoldings.forEach((amount, mint) => {
-        console.log(`  ${mint.slice(0, 8)}: ${amount}`);
-    });
+    // console.log('[PortfolioDebug] Initial Holdings (from currentAssets):');
+    // currentHoldings.forEach((amount, mint) => {
+    //     console.log(`  ${mint.slice(0, 8)}: ${amount}`);
+    // });
 
     // Helper to get holdings at time T
     // We iterate backwards. 
@@ -223,7 +223,7 @@ export async function calculateHistoricalPortfolio(
         ? Math.min(...balanceChanges.map(c => c.timestamp))
         : Date.now(); // If no balance changes, assume wallet just started now
 
-    console.log(`[PortfolioDebug] Earliest transaction time: ${new Date(earliestTransactionTime).toISOString()}`);
+    // console.log(`[PortfolioDebug] Earliest transaction time: ${new Date(earliestTransactionTime).toISOString()}`);
 
     let holdings = new Map(currentHoldings);
     let lastTime = Date.now();
@@ -252,7 +252,7 @@ export async function calculateHistoricalPortfolio(
         // the wallet was empty - show $0
         if (time < earliestTransactionTime) {
             portfolioHistory.push({ timestamp: time, value: 0 });
-            console.log(`[PortfolioDebug] Time: ${new Date(time).toISOString()} | Value: $0.00 (before first transaction)`);
+            // console.log(`[PortfolioDebug] Time: ${new Date(time).toISOString()} | Value: $0.00 (before first transaction)`);
             lastTime = time;
             continue;
         }
@@ -321,7 +321,7 @@ export async function calculateHistoricalPortfolio(
 
         // Log first few and last few data points
         if (portfolioHistory.length <= 3 || sortedTimestamps.indexOf(time) >= sortedTimestamps.length - 3) {
-            console.log(`[PortfolioDebug] Time: ${new Date(time).toISOString()} | Value: $${totalValue.toFixed(2)}`);
+            // console.log(`[PortfolioDebug] Time: ${new Date(time).toISOString()} | Value: $${totalValue.toFixed(2)}`);
         }
 
         lastTime = time;
