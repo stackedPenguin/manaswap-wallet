@@ -154,72 +154,87 @@ async function trackPortfolioValue() {
 
     console.log('[Background] Tracking portfolio value for', address);
 
-    // 1. Fetch Balances (SOL + SPL)
-    // We need to fetch balances for all networks to get a total "Net Worth"
+    // We need to track value for EACH network separately to support per-chain history
     const allNetworks = getAllNetworks(settings.customNetworks);
+
+    // Fetch Balances for all networks
     const balances = await Promise.all(allNetworks.map(n => fetchAccountBalance(address, n.id, settings.customNetworks).catch(() => null)));
-
-    const allMints = new Set<string>(['So11111111111111111111111111111111111111112']);
-    let totalSolBalance = 0;
-    const tokenBalances: { mint: string; amount: number }[] = [];
-
-    balances.forEach(b => {
-      if (b) {
-        totalSolBalance += b.solBalance;
-        b.tokens.forEach(t => {
-          allMints.add(t.mint);
-          tokenBalances.push({ mint: t.mint, amount: Number(t.amount) / Math.pow(10, t.decimals) });
-        });
-      }
+    const balancesMap = new Map();
+    allNetworks.forEach((n, i) => {
+      if (balances[i]) balancesMap.set(n.id, balances[i]);
     });
 
-    // 2. Fetch Perps Positions (Mainnet only)
-    let perpsValue = 0;
-    try {
-      const rpcUrl = 'https://api.mainnet-beta.solana.com'; // Use mainnet for perps
-      const connection = new Connection(rpcUrl);
-      const perps = await fetchJupiterPerpsPositions(connection, address);
+    // Calculate and save value for each network
+    for (const network of allNetworks) {
+      try {
+        const balance = balancesMap.get(network.id);
+        if (!balance) continue;
 
-      // We need prices for perps too
-      perps.forEach(p => allMints.add(p.marketMint));
+        // 1. Native Token Value
+        let nativeValue = 0;
+        if (network.kind === 'x1') {
+          // X1 is hardcoded $1 (for now, or fetched if XNT price available)
+          nativeValue = balance.solBalance * 1.0;
+        } else {
+          // Solana use SOL price
+          const solMint = 'So11111111111111111111111111111111111111112';
+          const prices = await fetchTokenPrices([solMint]);
+          nativeValue = balance.solBalance * (prices.get(solMint) || 0);
+        }
 
-      // We can't calculate PnL yet without prices, so store perps for later
-      // ...
+        // 2. Token Value
+        let tokenValue = 0;
+        const mints = balance.tokens.map((t: any) => t.mint);
+        if (mints.length > 0 && network.kind === 'solana') {
+          const prices = await fetchTokenPrices(mints);
+          balance.tokens.forEach((t: any) => {
+            const price = prices.get(t.mint) || 0;
+            tokenValue += (Number(t.amount) / Math.pow(10, t.decimals)) * price;
+          });
+        }
 
-      // Fetch Prices
-      const prices = await fetchTokenPrices(Array.from(allMints));
+        // 3. Perps Value (Solana Mainnet Only)
+        let perpsValue = 0;
+        if (network.id === 'solana-mainnet') {
+          try {
+            const rpcUrl = 'https://api.mainnet-beta.solana.com';
+            const connection = new Connection(rpcUrl);
+            const perps = await fetchJupiterPerpsPositions(connection, address);
 
-      // Calculate Perps Value
-      perps.forEach(pos => {
-        const currentPrice = prices.get(pos.marketMint) || 0;
-        const pnl = calculatePositionPnl(pos, currentPrice);
-        perpsValue += pos.collateralUsd + pnl - pos.borrowFee - pos.closeFee;
-      });
+            // Need perps market prices
+            const perpsMints = perps.map(p => p.marketMint);
+            const perpsPrices = await fetchTokenPrices(perpsMints);
 
-      // Calculate Token Value
-      let tokenValue = 0;
+            perps.forEach(pos => {
+              const currentPrice = perpsPrices.get(pos.marketMint) || 0;
+              const pnl = calculatePositionPnl(pos, currentPrice);
+              perpsValue += pos.collateralUsd + pnl - pos.borrowFee - pos.closeFee;
+            });
+          } catch (e) {
+            // console.error('[Background] Failed to fetch perps for history', e);
+          }
+        }
 
-      // SOL Value
-      const solPrice = prices.get('So11111111111111111111111111111111111111112') || 0;
-      tokenValue += totalSolBalance * solPrice;
+        // 4. Staked Value (X1 Only)
+        let stakedValue = 0;
+        if (network.kind === 'x1') {
+          // We need to fetch staked amount? 
+          // `fetchAccountBalance` might not include stakes. 
+          // For now, let's omit expensive stake fetch in background loop to avoid RPC blast.
+          // Or assume user wants it? User said "confusing chains". 
+          // Let's stick to simple balance + perps separation first.
+        }
 
-      // SPL Token Value
-      tokenBalances.forEach(t => {
-        const price = prices.get(t.mint) || 0;
-        tokenValue += t.amount * price;
-      });
+        const totalValue = nativeValue + tokenValue + perpsValue + stakedValue;
 
-      const totalValue = tokenValue + perpsValue;
+        await savePortfolioDataPoint(address, network.id, {
+          timestamp: Date.now(),
+          value: totalValue
+        });
 
-      await savePortfolioDataPoint(address, {
-        timestamp: Date.now(),
-        value: totalValue
-      });
-
-      // console.log('[Background] Portfolio value tracked:', totalValue);
-
-    } catch (e) {
-      console.error('[Background] Failed to track portfolio value', e);
+      } catch (e) {
+        // Continue to next network
+      }
     }
   } catch (e) {
     console.error('[Background] Error in trackPortfolioValue', e);
@@ -1368,7 +1383,8 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
         try {
           // Dynamic import to avoid circular dependencies if any, or just import at top
           const { getPortfolioHistory } = await import('../shared/portfolio');
-          const history = await getPortfolioHistory(message.payload.address);
+          const { address, networkId } = message.payload;
+          const history = await getPortfolioHistory(address, networkId);
           sendResponse({ success: true, history });
         } catch (e: any) {
           sendResponse({ success: false, error: e.message });

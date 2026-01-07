@@ -192,7 +192,7 @@ export type ManaswapMessage =
   | { type: 'manaswap:getTokenPrices'; payload: { mints: string[] } }
   | { type: 'manaswap:getTransactionHistory'; payload: { address: string; networkId: NetworkClusterId; limit?: number } }
   | { type: 'manaswap:executeSwap'; payload: { swapTransactionBase64: string } }
-  | { type: 'manaswap:getPortfolioHistory'; payload: { address: string } }
+  | { type: 'manaswap:getPortfolioHistory'; payload: { address: string; networkId: NetworkClusterId } }
   // Ledger Messages
   | { type: 'manaswap:ledgerSignResult'; payload: { requestId: string; signature: number[] } }
   // dApp Network Messages

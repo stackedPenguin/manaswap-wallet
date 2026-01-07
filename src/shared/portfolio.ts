@@ -8,20 +8,20 @@ export interface PortfolioDataPoint {
 
 export const PORTFOLIO_STORAGE_KEY_PREFIX = 'portfolio_history_';
 
-export async function getPortfolioHistory(address: string): Promise<PortfolioDataPoint[]> {
-    const key = `${PORTFOLIO_STORAGE_KEY_PREFIX}${address}`;
+export async function getPortfolioHistory(address: string, networkId: string): Promise<PortfolioDataPoint[]> {
+    const key = `${PORTFOLIO_STORAGE_KEY_PREFIX}${address}_${networkId}`;
     const result = await chrome.storage.local.get(key);
     return (result[key] as PortfolioDataPoint[]) || [];
 }
 
-export async function savePortfolioHistory(address: string, history: PortfolioDataPoint[]) {
-    const key = `${PORTFOLIO_STORAGE_KEY_PREFIX}${address}`;
+export async function savePortfolioHistory(address: string, networkId: string, history: PortfolioDataPoint[]) {
+    const key = `${PORTFOLIO_STORAGE_KEY_PREFIX}${address}_${networkId}`;
     await chrome.storage.local.set({ [key]: history });
 }
 
-export async function savePortfolioDataPoint(address: string, point: PortfolioDataPoint): Promise<void> {
-    const key = `${PORTFOLIO_STORAGE_KEY_PREFIX}${address}`;
-    const history = await getPortfolioHistory(address);
+export async function savePortfolioDataPoint(address: string, networkId: string, point: PortfolioDataPoint): Promise<void> {
+    const key = `${PORTFOLIO_STORAGE_KEY_PREFIX}${address}_${networkId}`;
+    const history = await getPortfolioHistory(address, networkId);
 
     // Add new point
     history.push(point);

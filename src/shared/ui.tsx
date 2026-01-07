@@ -104,7 +104,7 @@ import {
   Coins,
   Zap,
   Search,
-
+  TrendingUp,
 } from 'lucide-react';
 
 // Icon Components
@@ -138,6 +138,7 @@ export const Icons = {
   Stake: (props: any) => <Coins size={20} {...props} />,
   Zap: (props: any) => <Zap size={16} {...props} />,
   Search: (props: any) => <Search size={16} {...props} />,
+  TrendingUp: (props: any) => <TrendingUp size={16} {...props} />,
 };
 
 interface ToggleProps {

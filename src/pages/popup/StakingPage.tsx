@@ -54,11 +54,13 @@ export function StakingPage({
     const loadData = useCallback(async () => {
         setLoadingData(true);
         try {
+            // 1. Load initial data (fast, uses cache for validators if available)
             const [vals, stakes, epochInfo] = await Promise.all([
-                getValidators(connection),
+                getValidators(connection, false),
                 getStakeAccountsForWallet(connection, walletAddress),
                 connection.getEpochInfo(),
             ]);
+
             setValidators(vals);
             setStakeAccounts(stakes);
 
@@ -74,10 +76,20 @@ export function StakingPage({
                 percent: (epochInfo.slotIndex / epochInfo.slotsInEpoch) * 100,
                 epoch: epochInfo.epoch
             });
+
+            setLoadingData(false); // Unblock UI immediately after cached data
+
+            // 2. Background Refresh (to update cache/UI with fresh data)
+            // We don't await this, so UI stays responsive
+            getValidators(connection, true).then(freshVals => {
+                // Only update if component is still mounted (simple check implied by React state update)
+                // In functional component, setValidators will just work or be ignored if unmounted
+                setValidators(freshVals);
+            }).catch(e => console.warn('[Staking] Background validator refresh failed:', e));
+
         } catch (e) {
             console.error('[Staking] Failed to load data:', e);
             showToast('Failed to load staking data', 'error');
-        } finally {
             setLoadingData(false);
         }
     }, [connection, walletAddress, showToast]);
@@ -122,7 +134,31 @@ export function StakingPage({
         const xnt = lamports / LAMPORTS_PER_SOL;
         if (xnt >= 1000000) return `${(xnt / 1000000).toFixed(1)}M`;
         if (xnt >= 1000) return `${(xnt / 1000).toFixed(1)}K`;
-        return xnt.toFixed(2);
+        return xnt.toFixed(4);
+    };
+
+    // Analytics Helper
+    const calculateAnalytics = (stake: StakeAccountInfo) => {
+        if (!stake.lastEpochReward || stake.lastEpochReward <= 0 || stake.activeStake <= 0) {
+            return null;
+        }
+
+        // Epoch Yield = Reward / (Balance - Reward) 
+        // We use (Balance - Reward) to approximate the principal at the start of the epoch
+        // Assuming the balance is principal + reward.
+        const principal = stake.balance - stake.lastEpochReward;
+        const epochYield = (stake.lastEpochReward / principal);
+        const yieldPercent = epochYield * 100;
+
+        // APY = (1 + yield)^epochsPerYear - 1
+        // Assuming ~2.5 days per epoch -> 365 / 2.5 = 146 epochs/year
+        const epochsPerYear = 146;
+        const apy = (Math.pow(1 + epochYield, epochsPerYear) - 1) * 100;
+
+        return {
+            yieldPercent: yieldPercent.toFixed(4), // 0.0200%
+            apy: apy.toFixed(2) // 7.50%
+        };
     };
 
     const getValidatorName = (address: string) => {
@@ -241,7 +277,7 @@ export function StakingPage({
                 }}>
                     <div style={{ flex: 1 }}>
                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '2px' }}>
-                            Amount (Bal: {xntBalance.toFixed(2)})
+                            Amount (Bal: {xntBalance.toFixed(4)})
                         </div>
                         <input
                             type="number"
@@ -462,11 +498,11 @@ export function StakingPage({
                                             }} />
                                             <div>
                                                 <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                                                    {stake.balance.toFixed(2)} XNT
+                                                    {stake.balance.toFixed(4)} XNT
                                                 </div>
                                                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                                                     {stake.lastEpochReward > 0
-                                                        ? `+${stake.lastEpochReward.toFixed(2)} Reward`
+                                                        ? `+${stake.lastEpochReward.toFixed(4)} Reward`
                                                         : stake.state.charAt(0).toUpperCase() + stake.state.slice(1)}
                                                 </div>
                                             </div>
@@ -489,6 +525,46 @@ export function StakingPage({
                                                 <span>Validator:</span>
                                                 <span>{getValidatorName(stake.delegatedVoteAccount || '')}</span>
                                             </div>
+
+                                            {/* Analytics Section */}
+                                            {stake.lastEpochReward > 0 && (
+                                                <div style={{
+                                                    marginBottom: '12px',
+                                                    padding: '10px',
+                                                    background: 'rgba(59, 130, 246, 0.08)',
+                                                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                                                    borderRadius: '8px'
+                                                }}>
+                                                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--primary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                        <Icons.TrendingUp size={12} /> Performance
+                                                    </div>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                                                        <div>
+                                                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Last Epoch</div>
+                                                            <div style={{ fontSize: '12px', fontWeight: 600, color: '#22c55e' }}>+{stake.lastEpochReward.toFixed(4)}</div>
+                                                        </div>
+                                                        {(() => {
+                                                            const metrics = calculateAnalytics(stake);
+                                                            return metrics ? (
+                                                                <>
+                                                                    <div>
+                                                                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Yield</div>
+                                                                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{metrics.yieldPercent}%</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Est. APY</div>
+                                                                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{metrics.apy}%</div>
+                                                                    </div>
+                                                                </>
+                                                            ) : (
+                                                                <div style={{ gridColumn: 'span 2', fontSize: '10px', color: 'var(--text-secondary)', fontStyle: 'italic', display: 'flex', alignItems: 'center' }}>
+                                                                    Pending first reward...
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             <div style={{ display: 'flex', gap: '8px' }}>
                                                 {(stake.state === 'active' || stake.state === 'activating') && (

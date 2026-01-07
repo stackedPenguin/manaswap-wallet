@@ -427,7 +427,7 @@ export function MainWallet() {
     if (selectedAccount) {
       void loadAllBalances();
     }
-  }, [selectedAccount?.address, settings.customNetworks]); // Reload if networks change too
+  }, [selectedAccount?.address, settings.customNetworks, selectedNetwork?.id]); // Reload if networks change too
 
   // Fetch staked amount for X1
   useEffect(() => {
@@ -502,13 +502,17 @@ export function MainWallet() {
 
       // Fetch Perps Positions
       try {
-        const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-        const connection = new Connection(rpcUrl);
-        const perps = await fetchJupiterPerpsPositions(connection, selectedAccount.address);
-        setPerpsPositions(perps);
+        if (selectedNetwork?.id === 'solana-mainnet') {
+          const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+          const connection = new Connection(rpcUrl);
+          const perps = await fetchJupiterPerpsPositions(connection, selectedAccount.address);
+          setPerpsPositions(perps);
 
-        // Add perps market mints to price fetch list
-        perps.forEach(p => allMints.add(p.marketMint));
+          // Add perps market mints to price fetch list
+          perps.forEach(p => allMints.add(p.marketMint));
+        } else {
+          setPerpsPositions([]);
+        }
 
       } catch (e) {
         console.error('Failed to fetch perps:', e);
@@ -659,7 +663,7 @@ export function MainWallet() {
     if (selectedAccount) {
       sendMessage<{ success: boolean; history: PortfolioDataPoint[] }>({
         type: 'manaswap:getPortfolioHistory',
-        payload: { address: selectedAccount.address }
+        payload: { address: selectedAccount.address, networkId: selectedNetwork?.id || 'solana-mainnet' }
       }).then(res => {
         if (res.success && res.history) {
           setPortfolioHistory(res.history);
@@ -1075,7 +1079,7 @@ export function MainWallet() {
                 setPortfolioHistory(history);
                 // Save to cache
                 import('../../shared/portfolio').then(({ savePortfolioHistory }) => {
-                  savePortfolioHistory(selectedAccount.address, history);
+                  savePortfolioHistory(selectedAccount.address, selectedNetwork.id || 'solana-mainnet', history);
                 });
               }
             }).catch(err => {
@@ -1098,7 +1102,7 @@ export function MainWallet() {
   useEffect(() => {
     if (selectedAccount?.address && unifiedAssets.length > 0) {
       import('../../shared/portfolio').then(({ getPortfolioHistory }) => {
-        getPortfolioHistory(selectedAccount.address).then(cachedHistory => {
+        getPortfolioHistory(selectedAccount.address, selectedNetwork?.id || 'solana-mainnet').then(cachedHistory => {
           if (cachedHistory && cachedHistory.length > 0) {
             setPortfolioHistory(prev => {
               // Only set if we don't have data yet (or if it's the initial empty state)
@@ -1280,7 +1284,7 @@ export function MainWallet() {
 
                       // Load cached portfolio history for this account
                       import('../../shared/portfolio').then(({ getPortfolioHistory }) => {
-                        getPortfolioHistory(acc.address).then((cached: PortfolioDataPoint[]) => {
+                        getPortfolioHistory(acc.address, selectedNetwork?.id || 'solana-mainnet').then((cached: PortfolioDataPoint[]) => {
                           if (cached.length > 0) {
                             setPortfolioHistory(cached);
                           }
@@ -1645,6 +1649,7 @@ export function MainWallet() {
       {showSendModal && selectedAccount && (
         <SendTransactionModal
           accountAddress={selectedAccount.address}
+          accounts={accounts}
           networkId={settings.selectedNetwork}
           balance={tokenToSend
             ? Number(tokenToSend.amount) / Math.pow(10, tokenToSend.decimals)

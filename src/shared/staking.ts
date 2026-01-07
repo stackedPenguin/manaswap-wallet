@@ -109,10 +109,28 @@ function decodeValidatorInfo(data: Buffer): ValidatorMeta | null {
     }
 }
 
+// Cache Key
+const VALIDATOR_CACHE_KEY = 'x1_validator_cache';
+const VALIDATOR_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+
 /**
  * Fetch all active validators from the X1 network
+ * Uses local storage caching to improve performance
  */
-export async function getValidators(connection: Connection): Promise<ValidatorInfo[]> {
+export async function getValidators(connection: Connection, forceRefresh = false): Promise<ValidatorInfo[]> {
+    // Check cache first
+    if (!forceRefresh) {
+        try {
+            const result = await chrome.storage.local.get(VALIDATOR_CACHE_KEY);
+            const data = result[VALIDATOR_CACHE_KEY] as { validators: ValidatorInfo[]; timestamp: number } | undefined;
+            if (data && data.timestamp && (Date.now() - data.timestamp < VALIDATOR_CACHE_DURATION)) {
+                return data.validators;
+            }
+        } catch (e) {
+            console.warn('[Staking] Failed to read validator cache:', e);
+        }
+    }
+
     const [voteAccounts, configAccounts] = await Promise.all([
         connection.getVoteAccounts(),
         connection.getProgramAccounts(CONFIG_PROGRAM_ID)
@@ -146,7 +164,21 @@ export async function getValidators(connection: Connection): Promise<ValidatorIn
     });
 
     // Sort by activated stake descending
-    return validators.sort((a, b) => b.activatedStake - a.activatedStake);
+    const sorted = validators.sort((a, b) => b.activatedStake - a.activatedStake);
+
+    // Save to cache
+    try {
+        await chrome.storage.local.set({
+            [VALIDATOR_CACHE_KEY]: {
+                validators: sorted,
+                timestamp: Date.now()
+            }
+        });
+    } catch (e) {
+        console.warn('[Staking] Failed to save validator cache:', e);
+    }
+
+    return sorted;
 }
 
 // =============================================================================
