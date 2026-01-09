@@ -1,16 +1,15 @@
+
 import { useEffect, useMemo, useState } from 'react';
 import { getAllNetworks, type NetworkConfig, type NetworkClusterId } from '../../shared/networks';
 import { defaultSettings } from '../../shared/settings';
 import type { WalletSettings, AccountInfo, AccountBalance, TransactionActivity, Notification, TokenBalance } from '../../shared/types';
 import { sendMessage } from '../../shared/messaging';
 import { fetchJupiterPerpsPositions, calculatePositionPnl, type PerpsPosition } from '../../shared/perps';
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import { ShowPrivateKeyModal } from './ShowPrivateKeyModal';
 import { NotificationToast } from './NotificationToast';
 import { AccountManagement, AccountDetailsModal, LedgerConnectModal } from './AccountManagement';
-import { SendTransactionModal } from './SendTransactionModal';
-import { ReceiveModal } from './ReceiveModal';
-import { SwapModal } from './SwapModal';
+
 import { StakingPage } from './StakingPage';
 import { getStakeAccountsForWallet, getX1RpcUrl } from '../../shared/staking';
 import { TokenDetails } from './TokenDetails';
@@ -18,6 +17,7 @@ import { DefiPositions } from './DefiPositions';
 import { Skeleton, Icons } from '../../shared/ui';
 import { createChart, ColorType, AreaSeries } from 'lightweight-charts';
 import type { PortfolioDataPoint } from '../../shared/portfolio';
+import { DriftService, ExtensionWallet, type DriftPosition } from '../../shared/drift';
 
 
 interface RuntimeResponse {
@@ -46,7 +46,23 @@ export interface UnifiedTokenBalance extends TokenBalance {
   networkKind: 'solana' | 'x1';
 }
 
-const activityBufferSize = 50;
+export interface UnifiedAsset {
+  type: 'token' | 'defi';
+  id: string;
+  mint?: string;
+  name: string;
+  symbol: string;
+  amount: string;
+  value: number;
+  logoURI?: string;
+  networkId: NetworkClusterId;
+  networkKind: 'solana' | 'x1';
+  token?: UnifiedTokenBalance;
+  defi?: PerpsPosition | DriftPosition;
+  defiProtocol?: 'Jupiter' | 'Drift';
+}
+
+
 
 function NetworkModal({
   isOpen,
@@ -315,6 +331,19 @@ function NetworkModal({
   );
 }
 
+// Helper: Map Drift symbols to underlying mints for pricing
+const getDriftUnderlyingMint = (symbol: string): string => {
+  const sym = symbol.toUpperCase();
+  if (sym.includes('SOL')) return 'So11111111111111111111111111111111111111112';
+  if (sym.includes('BTC')) return '3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh'; // Wrapped BTC (Sollet)
+  if (sym.includes('ETH')) return '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs'; // Wrapped ETH (Wormhole)
+  if (sym.includes('DOGE')) return 'CiKu4eCaR1U1AVKqFp4rksr5JQbw8tu2M6hQFa8n1bX'; // Wormhole DOGE
+  if (sym.includes('BONK')) return 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263';
+  if (sym.includes('WIF')) return 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm';
+  if (sym.includes('POPCAT')) return '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr';
+  return '';
+};
+
 export function MainWallet() {
   const [settings, setSettings] = useState<WalletSettings>(defaultSettings);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
@@ -332,16 +361,17 @@ export function MainWallet() {
   const [balances, setBalances] = useState<Map<NetworkClusterId, AccountBalance>>(new Map());
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
 
-  const [showSendModal, setShowSendModal] = useState(false);
-  const [tokenToSend, setTokenToSend] = useState<UnifiedTokenBalance | null>(null);
-  const [showReceiveModal, setShowReceiveModal] = useState(false);
-  const [showSwapModal, setShowSwapModal] = useState(false);
+
+
+
+
   const [showNetworkModal, setShowNetworkModal] = useState(false);
-  const [view, setView] = useState<'home' | 'history' | 'defi' | 'staking'>('home');
+  const [view, setView] = useState<'home' | 'history' | 'defi' | 'staking' | 'swap' | 'send' | 'receive'>('home');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [prices, setPrices] = useState<Map<string, number>>(new Map());
   const [selectedTokenForDetails, setSelectedTokenForDetails] = useState<UnifiedTokenBalance | null>(null);
   const [perpsPositions, setPerpsPositions] = useState<PerpsPosition[]>([]);
+  const [driftPositions, setDriftPositions] = useState<DriftPosition[]>([]);
   const [perpsValue, setPerpsValue] = useState<number>(0);
   const [initialDefiTab, setInitialDefiTab] = useState<'limit' | 'dca' | 'perps'>('perps');
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioDataPoint[]>([]);
@@ -504,14 +534,31 @@ export function MainWallet() {
       try {
         if (selectedNetwork?.id === 'solana-mainnet') {
           const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-          const connection = new Connection(rpcUrl);
+          const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
+
+          // Jupiter
           const perps = await fetchJupiterPerpsPositions(connection, selectedAccount.address);
           setPerpsPositions(perps);
-
-          // Add perps market mints to price fetch list
           perps.forEach(p => allMints.add(p.marketMint));
+
+          // Drift
+          try {
+            const driftService = DriftService.getInstance(connection, new ExtensionWallet(new PublicKey(selectedAccount.address), selectedAccount.address));
+            await driftService.initialize();
+            const drift = await driftService.getDetailedPositions();
+            setDriftPositions(drift);
+            drift.forEach(p => {
+              const mint = getDriftUnderlyingMint(p.symbol);
+              if (mint) allMints.add(mint);
+            });
+          } catch (driftErr) {
+            console.warn('Failed to fetch Drift positions', driftErr);
+            setDriftPositions([]);
+          }
+
         } else {
           setPerpsPositions([]);
+          setDriftPositions([]);
         }
 
       } catch (e) {
@@ -622,8 +669,13 @@ export function MainWallet() {
       const net = pos.collateralUsd + pnl - pos.borrowFee - pos.closeFee;
       total += net;
     });
+    driftPositions.forEach(pos => {
+      // Drift Net Value Approx = Size / Leverage
+      const net = pos.sizeUsd / (pos.leverage || 1);
+      total += net;
+    });
     setPerpsValue(total);
-  }, [perpsPositions, prices]);
+  }, [perpsPositions, driftPositions, prices]);
 
   // Aggregate Total Equity for selected network only
   const totalUsd = useMemo(() => {
@@ -857,24 +909,10 @@ export function MainWallet() {
     };
   }, [view, portfolioHistory, totalUsd, showChart, chartInterval]);
 
-  // Unified Asset Interface
-  interface UnifiedAsset {
-    type: 'token' | 'defi';
-    id: string;
-    mint?: string;
-    name: string;
-    symbol: string;
-    amount: string;
-    value: number;
-    logoURI?: string;
-    networkId: NetworkClusterId;
-    networkKind: 'solana' | 'x1';
-    token?: UnifiedTokenBalance;
-    defi?: PerpsPosition;
-  }
+
 
   // Aggregate Unified Asset List (Tokens + DeFi)
-  const unifiedAssets = useMemo(() => {
+  const unifiedAssets = useMemo<UnifiedAsset[]>(() => {
     const assets: UnifiedAsset[] = [];
 
     // Only show assets from the selected network
@@ -952,38 +990,57 @@ export function MainWallet() {
           symbol: `${pos.side} ${symbol}`,
           amount: `${pos.leverage.toFixed(1)}x`,
           value: netValue,
-          logoURI: 'https://jup.ag/svg/jupiter-logo.svg',
+          logoURI: '/icons/jupiter-defi.png',
           networkId: 'solana-mainnet',
           networkKind: 'solana',
-          defi: pos
+          defi: pos,
+          defiProtocol: 'Jupiter'
+        });
+      });
+
+      // 4. Add DeFi Positions (Drift) - only on Solana mainnet
+      driftPositions.forEach((pos) => {
+        // Net Value = Collateral + PnL
+        const netValue = pos.collateralUsd + pos.pnl;
+
+        const symbol = pos.symbol;
+
+        assets.push({
+          type: 'defi',
+          id: `drift-${pos.marketIndex}`,
+          name: 'Drift Perp',
+          symbol: `${pos.side} ${symbol}`,
+          amount: `${pos.leverage.toFixed(1)}x`,
+          value: netValue,
+          logoURI: '/icons/drift-defi.png',
+          networkId: 'solana-mainnet',
+          networkKind: 'solana',
+          defi: pos,
+          defiProtocol: 'Drift'
         });
       });
     }
 
     // Sort by USD value descending
     return assets.sort((a, b) => b.value - a.value);
-  }, [balances, prices, selectedNetwork, perpsPositions]);
+  }, [balances, prices, selectedNetwork, perpsPositions, driftPositions]);
 
-  // Effect to backfill history if empty
-  // Effect to backfill history if empty
   useEffect(() => {
-    console.log('[MainWalletDebug] History Effect:', { view, portfolioHistoryLen: portfolioHistory.length, unifiedAssetsLen: unifiedAssets.length, selectedAccount: selectedAccount?.address });
-    // Always recalculate for debugging - remove portfolioHistory.length < 2 check
     if (view === 'home' && unifiedAssets.length > 0 && selectedAccount && selectedNetwork) {
-      console.log('[MainWalletDebug] Calculating portfolio history...');
-
-      // For X1 networks: Calculate history using balance changes (no OHLC, fixed $1/XNT)
       if (selectedNetwork.kind === 'x1') {
-        const balance = balances.get(selectedNetwork.id);
+        const network = selectedNetwork;
+        const account = selectedAccount;
+        const balance = balances.get(network.id);
         const xntBalance = balance?.solBalance || 0;
-        const XNT_PRICE = 1.0; // $1 per XNT
+        const XNT_PRICE = 1.0;
 
         console.log('[MainWalletDebug] X1 network detected, fetching balance changes...');
         console.log('[MainWalletDebug] Current XNT balance:', xntBalance);
 
         // Fetch x1 balance changes
         import('../../shared/history').then(({ fetchBalanceChanges }) => {
-          fetchBalanceChanges(selectedAccount.address, selectedNetwork.id).then(balanceChanges => {
+          if (!account || !network) return;
+          fetchBalanceChanges(account.address, network.id).then(balanceChanges => {
             console.log('[MainWalletDebug] X1 balance changes received:', balanceChanges.length);
 
             // Generate hourly timestamps for past 7 days
@@ -1037,11 +1094,27 @@ export function MainWallet() {
         .filter(a => (a.type === 'token' && (a.value > 1 || a.symbol === 'SOL' || a.symbol === 'XNT')) || (a.type === 'defi' && a.value > 1)) // Include Tokens > $1, SOL, XNT, and DeFi > $1
         .map(a => {
           if (a.type === 'defi' && a.defi) {
-            // For DeFi, map to underlying mint and calculate effective amount
-            // Effective Amount = Net Value / Current Price of Underlying
-            // This assumes the position value moves roughly with the underlying asset (valid for long, approx for others)
-            const underlyingMint = a.defi.marketMint;
+            let underlyingMint = '';
+            const defi = a.defi as any;
+
+            // Handle Jupiter (has marketMint)
+            if (defi.marketMint) {
+              underlyingMint = defi.marketMint;
+            }
+            // Handle Drift (has symbol)
+            else if (defi.symbol) {
+              underlyingMint = getDriftUnderlyingMint(defi.symbol);
+            }
+
+            if (!underlyingMint) {
+              console.warn('[MainWalletDebug] Skipping DeFi asset for history (unknown mint):', a.symbol, a.name);
+              return null;
+            }
+
             const currentPrice = prices.get(underlyingMint) || 0;
+            if (currentPrice === 0) {
+              console.warn('[MainWalletDebug] DeFi asset has 0 price for mint:', underlyingMint);
+            }
             const effectiveAmount = currentPrice > 0 ? a.value / currentPrice : 0;
 
             return {
@@ -1058,7 +1131,8 @@ export function MainWallet() {
             amount: parseFloat(a.amount),
             value: a.value
           };
-        });
+        })
+        .filter((a) => a !== null) as { mint: string; amount: number; value: number }[];
 
       console.log('[MainWalletDebug] Assets for history:', assetsForHistory.length, assetsForHistory.map(a => ({ mint: a.mint.slice(0, 8), amount: a.amount })));
 
@@ -1095,7 +1169,7 @@ export function MainWallet() {
         console.log('[MainWalletDebug] No assets for history, skipping calculation');
       }
     }
-  }, [unifiedAssets, selectedAccount?.address, selectedNetwork]);
+  }, [unifiedAssets, view, selectedAccount, selectedNetwork, prices]);
 
 
   // Load cached history on mount - but only if wallet has assets
@@ -1158,18 +1232,16 @@ export function MainWallet() {
         token={selectedTokenForDetails}
         onBack={() => setSelectedTokenForDetails(null)}
         onSend={() => {
-          // Capture the token before clearing selection
-          setTokenToSend(selectedTokenForDetails);
           setSelectedTokenForDetails(null);
-          setShowSendModal(true);
+          setView('send');
         }}
         onReceive={() => {
           setSelectedTokenForDetails(null);
-          setShowReceiveModal(true);
+          setView('receive');
         }}
         onSwap={() => {
           setSelectedTokenForDetails(null);
-          setShowSwapModal(true);
+          setView('swap');
         }}
       />
     );
@@ -1408,15 +1480,15 @@ export function MainWallet() {
 
           {/* Action Buttons */}
           <div className="action-buttons">
-            <div className="action-button" onClick={() => setShowSendModal(true)}>
+            <div className="action-button" onClick={() => setView('send')}>
               <div className="action-button-icon"><Icons.Send /></div>
               <div className="action-button-label">Send</div>
             </div>
-            <div className="action-button" onClick={() => setShowReceiveModal(true)} title="Receive">
+            <div className="action-button" onClick={() => setView('receive')} title="Receive">
               <div className="action-button-icon"><Icons.Receive /></div>
               <div className="action-button-label">Receive</div>
             </div>
-            <div className="action-button" onClick={() => setShowSwapModal(true)} title="Swap">
+            <div className="action-button" onClick={() => setView('swap')} title="Swap">
               <div className="action-button-icon"><Icons.Swap /></div>
               <div className="action-button-label">Swap</div>
             </div>
@@ -1640,81 +1712,12 @@ export function MainWallet() {
           walletAddress={selectedAccount?.address || ''}
           onBack={() => setView('home')}
           tokens={unifiedAssets.filter(a => a.type === 'token').map(a => a.token!)}
-          prices={prices}
           initialTab={initialDefiTab}
+          prices={prices}
         />
       ) : null}
 
-      {/* Modals */}
-      {showSendModal && selectedAccount && (
-        <SendTransactionModal
-          accountAddress={selectedAccount.address}
-          accounts={accounts}
-          networkId={settings.selectedNetwork}
-          balance={tokenToSend
-            ? Number(tokenToSend.amount) / Math.pow(10, tokenToSend.decimals)
-            : (balances.get(settings.selectedNetwork)?.solBalance || 0)}
-          token={tokenToSend ? {
-            mint: tokenToSend.mint,
-            symbol: tokenToSend.symbol || 'Unknown',
-            name: tokenToSend.name || 'Unknown Token',
-            logoURI: tokenToSend.logoURI,
-            decimals: tokenToSend.decimals,
-          } : undefined}
-          onClose={() => {
-            setShowSendModal(false);
-            setTokenToSend(null);
-          }}
-          onSuccess={(signature?: string) => {
-            loadAllBalances();
-            setTokenToSend(null);
-            setToast({ message: 'Transaction sent!', type: 'success' });
 
-            setActivityLog((prev) => {
-              const entry = {
-                message: `Sent transaction @${new Date().toLocaleTimeString()}`,
-                signature,
-                timestamp: Date.now(),
-                dateStr: new Date().toLocaleDateString(),
-                timeStr: new Date().toLocaleTimeString(),
-                type: 'send' as const
-              };
-              return [entry, ...prev].slice(0, activityBufferSize);
-            });
-          }}
-        />
-      )}
-
-      {showReceiveModal && selectedAccount && (
-        <ReceiveModal
-          address={selectedAccount.address}
-          networkId={settings.selectedNetwork}
-          onClose={() => setShowReceiveModal(false)}
-        />
-      )}
-
-      {showSwapModal && selectedAccount && (
-        <SwapModal
-          isOpen={showSwapModal}
-          onClose={() => setShowSwapModal(false)}
-          userTokens={unifiedAssets.filter(a => a.type === 'token').map(a => a.token!)}
-          userAddress={selectedAccount.address}
-          onSuccess={() => {
-            loadAllBalances();
-            setToast({ message: 'Swap successful!', type: 'success' });
-
-            setActivityLog((prev) => {
-              const entry = {
-                message: `Swapped tokens @${new Date().toLocaleTimeString()}`,
-                timestamp: Date.now(),
-                dateStr: new Date().toLocaleDateString(),
-                timeStr: new Date().toLocaleTimeString()
-              };
-              return [entry, ...prev].slice(0, activityBufferSize);
-            });
-          }}
-        />
-      )}
 
 
 

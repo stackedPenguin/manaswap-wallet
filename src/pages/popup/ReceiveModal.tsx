@@ -2,16 +2,16 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Icons } from '../../shared/ui';
 import type { NetworkClusterId } from '../../shared/networks';
 
-interface ReceiveModalProps {
+interface ReceivePageProps {
     address: string;
     networkId: NetworkClusterId;
-    onClose: () => void;
+    onBack: () => void;
 }
 
-export function ReceiveModal({ address, networkId, onClose }: ReceiveModalProps) {
+export function ReceivePage({ address, networkId, onBack }: ReceivePageProps) {
     const copyAddress = () => {
         navigator.clipboard.writeText(address);
-        // Ideally show toast here, but for now we rely on user clicking copy button
+        // Ideally show toast here
     };
 
     const networkName = networkId === 'mainnet-beta' ? 'Solana Mainnet' :
@@ -20,52 +20,56 @@ export function ReceiveModal({ address, networkId, onClose }: ReceiveModalProps)
                 networkId === 'x1-testnet' ? 'X1 Testnet' : 'Custom Network';
 
     return (
-        <div style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 100,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'
-        }} onClick={onClose}>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-primary)' }}>
+            {/* Standard Header */}
             <div style={{
-                background: 'var(--bg-secondary)', width: '100%', maxWidth: '320px',
-                borderRadius: '24px', padding: '24px', border: '1px solid var(--card-border)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center'
-            }} onClick={e => e.stopPropagation()}>
-                <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                        <Icons.Close />
-                    </button>
-                </div>
+                background: 'var(--bg-secondary)',
+                borderBottom: '1px solid var(--card-border)',
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+            }}>
+                <button onClick={onBack} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: 4, display: 'flex' }}>
+                    <Icons.ArrowLeft />
+                </button>
+                <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Receive Assets</h2>
+            </div>
 
-                <h3 style={{ margin: '0 0 8px', fontSize: '1.2rem' }}>Receive Assets</h3>
-                <p style={{ margin: '0 0 24px', fontSize: '0.9rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+            <div style={{
+                flex: 1,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                padding: '24px'
+            }}>
+                <p style={{ margin: '0 0 32px', fontSize: '0.95rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
                     Scan to send to this address
                 </p>
 
                 <div style={{
-                    background: 'white', padding: '16px', borderRadius: '16px', marginBottom: '24px',
-                    boxShadow: '0 0 20px rgba(255,255,255,0.1)'
+                    background: 'white', padding: '20px', borderRadius: '24px', marginBottom: '32px',
+                    boxShadow: '0 0 20px rgba(0,0,0,0.3)'
                 }}>
-                    <QRCodeSVG value={address} size={180} />
+                    <QRCodeSVG value={address} size={200} />
                 </div>
 
                 <div style={{
-                    background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '12px',
-                    width: '100%', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                    background: 'var(--bg-secondary)', padding: '16px', borderRadius: '16px', border: '1px solid var(--card-border)',
+                    width: '100%', marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between'
                 }}>
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.85rem', marginRight: '8px' }}>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.9rem', marginRight: '12px' }}>
                         {address}
                     </div>
                     <button onClick={copyAddress} style={{ background: 'none', border: 'none', color: 'var(--accent-color)', cursor: 'pointer' }}>
-                        <Icons.Copy />
+                        <Icons.Copy size={20} />
                     </button>
                 </div>
 
                 <div style={{
                     display: 'flex', alignItems: 'center', gap: '8px',
-                    fontSize: '0.85rem', color: 'var(--text-secondary)',
-                    background: 'rgba(255,255,255,0.02)', padding: '8px 16px', borderRadius: '20px'
+                    fontSize: '0.9rem', color: 'var(--text-secondary)',
+                    background: 'rgba(255,255,255,0.03)', padding: '8px 16px', borderRadius: '20px'
                 }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--success-color)' }}></span>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success-color)' }}></span>
                     Current Chain: <span style={{ color: 'var(--text-primary)', fontWeight: '600' }}>{networkName}</span>
                 </div>
             </div>

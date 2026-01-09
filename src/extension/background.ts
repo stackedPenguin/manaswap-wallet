@@ -31,6 +31,7 @@ import {
 import { Connection, VersionedTransaction, Transaction, Keypair } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 import { getLedgerAccounts } from './ledger';
+import { getTrezorAccounts } from './trezor';
 import { savePortfolioDataPoint } from '../shared/portfolio';
 import { fetchJupiterPerpsPositions, calculatePositionPnl } from '../shared/perps';
 
@@ -484,8 +485,8 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
       case 'manaswap:addKeySource': {
         try {
           await getVaultState(); // Ensure session is restored
-          await addKeySource(message.payload.type, message.payload.value, message.payload.label);
-          sendResponse({ success: true });
+          const accounts = await addKeySource(message.payload.type, message.payload.value, message.payload.label);
+          sendResponse({ success: true, accounts });
         } catch (e: any) {
           sendResponse({ success: false, error: e.message });
         }
@@ -495,6 +496,16 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
         try {
           // @ts-ignore - payload might not exist on type yet, need to update types
           const accounts = await getLedgerAccounts(message.payload?.pathStart, message.payload?.limit);
+          sendResponse({ success: true, accounts });
+        } catch (e: any) {
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:getTrezorAccounts': {
+        try {
+          // @ts-ignore
+          const accounts = await getTrezorAccounts(message.payload?.pathStart, message.payload?.limit);
           sendResponse({ success: true, accounts });
         } catch (e: any) {
           sendResponse({ success: false, error: e.message });
@@ -682,6 +693,35 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           sendResponse({ success: true, signature });
         } catch (e: any) {
           console.error('[Background] Swap execution failed:', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:broadcastTransaction': {
+        try {
+          const { serializedTransaction, networkId } = message.payload;
+          const settings = await readSettings();
+          // Use networkId from payload or fallback to settings
+          const targetNetworkId = networkId || settings.selectedNetwork;
+
+          const config = getNetworkConfig(targetNetworkId, settings.customNetworks);
+          const connection = new Connection(config.rpcUrl, 'confirmed');
+
+          // Send and confirm
+          // Note: serializedTransaction comes as Object/Array from JSON message, need to convert to Uint8Array/Buffer
+          const txBuffer = Buffer.from(Object.values(serializedTransaction));
+
+          const signature = await connection.sendRawTransaction(txBuffer, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          });
+
+          // Wait for confirmation logic could be added here or just return signature
+          console.log('[Background] Broadcasted raw transaction:', signature);
+
+          sendResponse({ success: true, signature });
+        } catch (e: any) {
+          console.error('[Background] Broadcast failed:', e);
           sendResponse({ success: false, error: e.message });
         }
         break;
@@ -1362,6 +1402,34 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           // Convert Map to Object for serialization
           sendResponse({ success: true, prices: Object.fromEntries(prices) });
         } catch (e: any) {
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:signTransaction': {
+        try {
+          // Internal sign request (for SDKs like Drift)
+          const { transaction: txBytes, accountAddress } = message.payload;
+
+          // Get keypair
+          const keypair = getAccountKeypair(accountAddress);
+
+          // Try VersionedTransaction first, fall back to legacy
+          let signedTxBytes: number[];
+
+          try {
+            const tx = VersionedTransaction.deserialize(new Uint8Array(txBytes));
+            tx.sign([keypair]);
+            signedTxBytes = Array.from(tx.serialize());
+          } catch {
+            const tx = Transaction.from(Buffer.from(txBytes));
+            tx.sign(keypair); // Legacy transaction sign
+            signedTxBytes = Array.from(tx.serialize());
+          }
+
+          sendResponse({ success: true, signedTransaction: signedTxBytes });
+        } catch (e: any) {
+          console.error('[Background] signTransaction failed:', e);
           sendResponse({ success: false, error: e.message });
         }
         break;

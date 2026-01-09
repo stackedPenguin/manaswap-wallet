@@ -177,3 +177,19 @@ export async function checkNetworkHealth(
     error,
   };
 }
+
+// XDEX API Endpoints
+// Solana: Uses Jupiter Aggregator (Open Routing)
+export const XDEX_SOLANA_API = 'https://quote-api.jup.ag/v6';
+
+// X1: Uses Custom XDEX Aggregator (Forked from Jupiter Metis)
+
+export const XDEX_X1_API = 'https://api.xdex.xyz/api/xendex'; // Custom X1 aggregator
+
+export function getChainId(networkId: NetworkClusterId): number {
+  if (networkId === 'x1-mainnet' || networkId === 'x1-testnet') return 195;
+  if (typeof networkId === 'string' && networkId.startsWith('x1-')) return 195;
+  return 101; // Solana Mainnet-beta
+}
+
+

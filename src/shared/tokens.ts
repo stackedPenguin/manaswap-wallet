@@ -1,4 +1,5 @@
 import { Connection, PublicKey } from '@solana/web3.js';
+import { getTokenMetadata } from '@solana/spl-token';
 import type { TokenBalance } from './types';
 
 // Jupiter Token List API (V1 Strict)
@@ -55,8 +56,17 @@ export const FALLBACK_TOKENS: JupiterToken[] = [
         decimals: 6,
         name: 'USDC.X',
         symbol: 'USDC.X',
-        logoURI: '/tokens/usdc.png',
+        logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png', // Reuse USDC logo
         tags: ['x1']
+    },
+    {
+        address: 'So11111111111111111111111111111111111111112',
+        chainId: 195, // X1 Native Reuse of Wrapped SOL Address (standard pattern)
+        decimals: 9,
+        name: 'X1 Native Token',
+        symbol: 'XNT',
+        logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png', // Reuse SOL logo for now
+        tags: ['x1', 'native']
     }
 ];
 
@@ -192,6 +202,44 @@ async function fetchOnChainMetadata(connection: Connection, mint: string): Promi
     const heliusMetadata = await fetchHeliusMetadata(mint);
     if (heliusMetadata) return heliusMetadata;
 
+    // 1. Try Token-2022 Metadata (Extension)
+    try {
+        const metadata = await getTokenMetadata(connection, new PublicKey(mint));
+        if (metadata) {
+            // console.log(`[Tokens] Found Token-2022 metadata for ${mint}:`, metadata);
+            let logoURI = '';
+            if (metadata.uri) {
+                try {
+                    const response = await fetchWithTimeout(metadata.uri);
+                    if (response.ok) {
+                        const json = await response.json();
+                        logoURI = json.image || '';
+                    }
+                } catch (e) {
+                    // console.warn(`[Tokens] Failed to fetch Token-2022 URI ${metadata.uri}:`, e);
+                }
+            }
+
+            return {
+                address: mint,
+                chainId: 101, // Default or infer?
+                decimals: 0, // We don't get decimals from metadata, usually from account info. caller handles it?
+                // Actually fetchUserTokens gets decimals from account info. 
+                // JupiterToken interface has decimals, but here we might default to 0 and let caller override if merging.
+                // But usually this function is called when we don't know the token.
+                // For display, name/symbol/logo are key.
+                name: metadata.name,
+                symbol: metadata.symbol,
+                logoURI,
+                tags: ['token-2022']
+            };
+        }
+    } catch (e) {
+        // Ignore error, might not be a Token-2022 mint or metadata not initialized
+        // console.debug(`[Tokens] Token-2022 metadata check failed for ${mint}`, e);
+    }
+
+    // 2. Try Legacy Metaplex (PDA)
     try {
         const mintPubkey = new PublicKey(mint);
         const [pda] = PublicKey.findProgramAddressSync(

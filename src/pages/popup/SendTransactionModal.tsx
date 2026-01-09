@@ -5,21 +5,28 @@ import { NETWORKS } from '../../shared/networks';
 import { sendMessage } from '../../shared/messaging';
 import { Icons } from '../../shared/ui';
 import { resolveX1NS } from '../../shared/x1ns';
+import { Connection, Transaction, PublicKey } from '@solana/web3.js';
+import { createSolTransferTransaction, createSplTokenTransferTransaction } from '../../shared/transactions';
+import { signTransactionTrezor } from '../../extension/trezor';
+import { getNetworkConfig } from '../../shared/networks';
 
-interface TokenInfo {
+export interface TokenInfo {
   mint: string;
   symbol: string;
   name: string;
   logoURI?: string;
   decimals: number;
+  balance?: number; // Optional balance from unified Asset
+  price?: number;   // Optional price from unified Asset
 }
 
 interface SendTransactionModalProps {
   accountAddress?: string;
   accounts: AccountInfo[];
   networkId: NetworkClusterId;
-  balance: number;
-  token?: TokenInfo;
+  defaultBalance: number; // SOL balance if no token selected
+  initialToken?: TokenInfo;
+  availableTokens: TokenInfo[]; // List of all available tokens for the current network
   onClose: () => void;
   onSuccess?: (signature?: string) => void;
 }
@@ -34,14 +41,21 @@ export function SendTransactionModal({
   accountAddress,
   accounts,
   networkId,
-  balance,
-  token,
+  defaultBalance,
+  initialToken,
+  availableTokens,
   onClose,
   onSuccess,
 }: SendTransactionModalProps) {
   const [recipient, setRecipient] = useState('');
   const [showOwnWallets, setShowOwnWallets] = useState(false);
   const ownWalletsRef = useRef<HTMLDivElement>(null);
+
+  // Token selection state
+  const [selectedToken, setSelectedToken] = useState<TokenInfo | undefined>(initialToken);
+  const [showTokenSelector, setShowTokenSelector] = useState(false);
+  const tokenSelectorRef = useRef<HTMLDivElement>(null);
+
   const [amount, setAmount] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState('');
@@ -51,8 +65,15 @@ export function SendTransactionModal({
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
 
   const network = NETWORKS.find((n) => n.id === networkId);
-  const currency = token?.symbol || (network?.kind === 'x1' ? 'XNT' : 'SOL');
+  const currency = selectedToken?.symbol || (network?.kind === 'x1' ? 'XNT' : 'SOL');
   const nativeCurrency = network?.kind === 'x1' ? 'XNT' : 'SOL';
+
+  // Fix: Use local icons for native currency to ensure XNT logo is correct
+  const nativeLogoURI = network?.kind === 'x1' ? '/icons/x1-logo.png' : '/icons/solana-logo.png';
+
+  // Determine balance and decimals based on selection
+  const currentBalance = selectedToken ? (selectedToken.balance || 0) : defaultBalance;
+  const currentDecimals = selectedToken ? selectedToken.decimals : 9;
 
   const isValidAddress = (addr: string): boolean => {
     try {
@@ -103,11 +124,14 @@ export function SendTransactionModal({
     }
   }, [recipient, resolvedAddress, amount]);
 
-  // Close own wallets dropdown when clicking outside
+  // Close selectors when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (ownWalletsRef.current && !ownWalletsRef.current.contains(event.target as Node)) {
         setShowOwnWallets(false);
+      }
+      if (tokenSelectorRef.current && !tokenSelectorRef.current.contains(event.target as Node)) {
+        setShowTokenSelector(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -137,8 +161,8 @@ export function SendTransactionModal({
       setError('Invalid amount');
       return;
     }
-    if (amountNum > balance) {
-      setError(`Insufficient balance. You have ${balance.toFixed(4)} ${currency}`);
+    if (amountNum > currentBalance) {
+      setError(`Insufficient balance. You have ${currentBalance.toFixed(selectedToken ? 4 : 6)} ${currency}`);
       return;
     }
     setShowReview(true);
@@ -151,23 +175,93 @@ export function SendTransactionModal({
       const amountNum = parseFloat(amount);
       const effectiveRecipient = resolvedAddress || recipient;
 
-      const res = await sendMessage<TransactionResponse>({
-        type: 'manaswap:sendTransaction',
-        payload: {
-          recipient: effectiveRecipient,
-          amount: amountNum,
-          networkId,
-          tokenMint: token?.mint,
-          tokenDecimals: token?.decimals,
-        },
-      });
-      if (res.success && res.signature) {
-        onSuccess?.(res.signature);
-        onClose();
+      // Find sender account to check type
+      const senderAccount = accounts.find(a => a.address === accountAddress);
+
+      if (senderAccount?.type === 'trezor') {
+        // Hardware Wallet Flow (Trezor)
+        if (!senderAccount.derivationPath) {
+          throw new Error('Trezor account missing derivation path');
+        }
+
+        const config = getNetworkConfig(networkId);
+        const connection = new Connection(config.rpcUrl, 'confirmed');
+        const senderPubkey = new PublicKey(accountAddress!); // ! safe because senderAccount exists
+
+        let transaction: Transaction;
+
+        if (selectedToken?.mint && selectedToken.mint !== 'So11111111111111111111111111111111111111112') {
+          // SPL Token
+          transaction = await createSplTokenTransferTransaction(
+            senderPubkey,
+            effectiveRecipient,
+            amountNum,
+            selectedToken.mint,
+            selectedToken.decimals,
+            connection
+          );
+        } else {
+          // Native SOL
+          transaction = await createSolTransferTransaction(
+            senderPubkey,
+            effectiveRecipient,
+            amountNum,
+            connection
+          );
+        }
+
+        // Serialize for Trezor (unsigned)
+        const serializedForTrezor = transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
+
+        // Sign with Trezor
+        const signature = await signTransactionTrezor(senderAccount.derivationPath, serializedForTrezor);
+
+        // Add signature to transaction
+        transaction.addSignature(senderPubkey, signature);
+
+        // Verify (optional but good sanity check)
+        if (!transaction.verifySignatures()) {
+          throw new Error('Signature verification failed');
+        }
+
+        // Broadcast
+        const res = await sendMessage<TransactionResponse>({
+          type: 'manaswap:broadcastTransaction',
+          payload: {
+            serializedTransaction: transaction.serialize(),
+            networkId: networkId
+          }
+        });
+
+        if (res.success && res.signature) {
+          onSuccess?.(res.signature);
+          onClose();
+        } else {
+          setError(res.error || 'Broadcast failed');
+          setShowReview(false);
+        }
+
       } else {
-        setError(res.error || 'Transaction failed');
-        setShowReview(false);
+        // Standard Flow (Background handles signing for Hot Wallets)
+        const res = await sendMessage<TransactionResponse>({
+          type: 'manaswap:sendTransaction',
+          payload: {
+            recipient: effectiveRecipient,
+            amount: amountNum,
+            networkId,
+            tokenMint: selectedToken?.mint,
+            tokenDecimals: selectedToken?.decimals,
+          },
+        });
+        if (res.success && res.signature) {
+          onSuccess?.(res.signature);
+          onClose();
+        } else {
+          setError(res.error || 'Transaction failed');
+          setShowReview(false);
+        }
       }
+
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'Transaction failed';
       setError(errorMessage);
@@ -178,11 +272,13 @@ export function SendTransactionModal({
   };
 
   const handleMax = () => {
-    if (feeEstimate && !token) {
-      const maxAmount = Math.max(0, balance - feeEstimate);
+    if (feeEstimate && !selectedToken) {
+      // For Native currency, subtract fee
+      const maxAmount = Math.max(0, currentBalance - feeEstimate);
       setAmount(maxAmount.toFixed(6));
     } else {
-      setAmount(balance.toFixed(6));
+      // For SPL tokens, you can send max balance (fee paid in SOL)
+      setAmount(currentBalance.toFixed(currentDecimals > 6 ? 6 : currentDecimals));
     }
   };
 
@@ -197,6 +293,10 @@ export function SendTransactionModal({
     color: '#fff',
     outline: 'none',
   };
+
+  const usdValue = (amount && !isNaN(parseFloat(amount)) && selectedToken?.price)
+    ? (parseFloat(amount) * selectedToken.price).toFixed(2)
+    : null;
 
   return (
     <div
@@ -225,50 +325,24 @@ export function SendTransactionModal({
           overflowY: 'auto', // Allow internal scrolling
         }}
       >
-        {/* Header - Fixed Top look but stays in flow, padding match StakingPage */}
+        {/* Standard Header */}
         <div style={{
-          padding: '16px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
           background: 'var(--bg-secondary)',
-          borderBottom: '1px solid var(--card-border)'
+          borderBottom: '1px solid var(--card-border)',
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
         }}>
-          {showReview ? (
-            <button
-              onClick={() => setShowReview(false)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-                padding: '4px',
-                fontSize: '0.9rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <Icons.ArrowLeft size={16} /> Back
-            </button>
-          ) : (
-            <div style={{ width: '40px' }} />
-          )}
-          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)' }}>
-            {showReview ? 'Confirm' : `Send ${currency}`}
-          </h2>
           <button
-            onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              padding: '4px',
-            }}
+            onClick={showReview ? () => setShowReview(false) : onClose}
+            style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: 4, display: 'flex' }}
           >
-            <Icons.Close size={18} />
+            <Icons.ArrowLeft />
           </button>
+          <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
+            {showReview ? 'Confirm' : `Send`}
+          </h2>
         </div>
 
 
@@ -426,7 +500,7 @@ export function SendTransactionModal({
                 )}
               </div>
 
-              {/* Amount Input */}
+              {/* Amount Input and Token Selection */}
               <div style={{ marginBottom: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                   <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Amount</label>
@@ -446,31 +520,163 @@ export function SendTransactionModal({
                     MAX
                   </button>
                 </div>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    min="0"
-                    placeholder="0.00"
-                    value={amount}
-                    onChange={(e) => { setAmount(e.target.value); setError(''); }}
-                    disabled={isSending}
-                    style={{ ...inputStyle, paddingRight: '60px' }}
-                  />
-                  <span style={{
-                    position: 'absolute',
-                    right: '14px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontSize: '0.85rem',
-                    color: 'var(--text-secondary)',
-                  }}>
-                    {currency}
-                  </span>
+
+                <div style={{ position: 'relative', display: 'flex', gap: '8px' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min="0"
+                      placeholder="0.00"
+                      value={amount}
+                      onChange={(e) => { setAmount(e.target.value); setError(''); }}
+                      disabled={isSending}
+                      style={{ ...inputStyle }}
+                    />
+                    {usdValue && (
+                      <span style={{
+                        position: 'absolute',
+                        right: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        fontSize: '0.8rem',
+                        color: 'var(--text-secondary)'
+                      }}>
+                        ≈${usdValue}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Token Selector Button */}
+                  <div style={{ position: 'relative' }} ref={tokenSelectorRef}>
+                    <button
+                      onClick={() => setShowTokenSelector(!showTokenSelector)}
+                      style={{
+                        height: '100%',
+                        padding: '0 16px',
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderRadius: '10px',
+                        color: 'white',
+                        fontWeight: 600,
+                        fontSize: '0.9rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <img
+                        src={selectedToken?.logoURI || nativeLogoURI}
+                        style={{ width: 20, height: 20, borderRadius: '50%' }}
+                        alt={selectedToken?.symbol || nativeCurrency}
+                      />
+                      {currency}
+                      <Icons.ChevronDown size={14} />
+                    </button>
+
+                    {showTokenSelector && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '100%',
+                        right: 0,
+                        marginTop: '8px',
+                        background: '#1a1a1a',
+                        border: '1px solid var(--card-border)',
+                        borderRadius: '12px',
+                        padding: '8px',
+                        minWidth: '240px',
+                        zIndex: 100,
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                        maxHeight: '300px',
+                        overflowY: 'auto'
+                      }}>
+                        {/* Default SOL/XNT Option */}
+                        <div
+                          onClick={() => {
+                            setSelectedToken(undefined); // undefined means Native SOL/XNT
+                            setShowTokenSelector(false);
+                            setAmount('');
+                          }}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: !selectedToken ? 'rgba(255,255,255,0.1)' : 'transparent',
+                            color: 'white'
+                          }}
+                          onMouseEnter={(e) => { if (selectedToken) e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
+                          onMouseLeave={(e) => { if (selectedToken) e.currentTarget.style.background = 'transparent' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <img src={nativeLogoURI} alt={nativeCurrency} style={{ width: 24, height: 24, borderRadius: '50%' }} />
+                            <span style={{ fontWeight: 600 }}>{nativeCurrency}</span>
+                          </div>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            {defaultBalance.toFixed(4)}
+                          </span>
+                        </div>
+
+                        <div style={{ height: 1, background: 'var(--card-border)', margin: '8px 0' }} />
+
+                        {/* SPL Tokens */}
+                        {availableTokens.map((t) => (
+                          <div
+                            key={t.mint}
+                            onClick={() => {
+                              setSelectedToken(t);
+                              setShowTokenSelector(false);
+                              setAmount('');
+                            }}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              background: selectedToken?.mint === t.mint ? 'rgba(255,255,255,0.1)' : 'transparent',
+                              color: 'white'
+                            }}
+                            onMouseEnter={(e) => { if (selectedToken?.mint !== t.mint) e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
+                            onMouseLeave={(e) => { if (selectedToken?.mint !== t.mint) e.currentTarget.style.background = 'transparent' }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <img src={t.logoURI} alt="" style={{ width: 24, height: 24, borderRadius: '50%' }} />
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{t.symbol}</span>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                {(t.balance || 0).toFixed(4)}
+                              </span>
+                              {t.price && t.balance && (
+                                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                                  ${(t.balance * t.price).toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                  Balance: {balance.toFixed(6)} {currency}
-                </p>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px' }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>
+                    Balance: {currentBalance.toFixed(6)} {currency}
+                  </p>
+                  {selectedToken?.price && !isNaN(currentBalance) && (
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>
+                      ≈${(currentBalance * selectedToken.price).toFixed(2)}
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Fee Info */}
@@ -547,33 +753,21 @@ export function SendTransactionModal({
             <>
               {/* Review: Token Icon + Amount */}
               <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                {token?.logoURI ? (
-                  <img
-                    src={token.logoURI}
-                    alt={token.symbol}
-                    style={{ width: '48px', height: '48px', borderRadius: '50%', marginBottom: '12px' }}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                ) : (
-                  <div style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '50%',
-                    margin: '0 auto 12px',
-                    background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '1rem',
-                    fontWeight: '600',
-                    color: '#fff',
-                  }}>
-                    {currency.slice(0, 3)}
-                  </div>
-                )}
+                <img
+                  src={selectedToken?.logoURI || nativeLogoURI}
+                  alt={selectedToken?.symbol || nativeCurrency}
+                  style={{ width: '48px', height: '48px', borderRadius: '50%', marginBottom: '12px' }}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                />
                 <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#fff' }}>
                   {parseFloat(amount).toFixed(6)} {currency}
                 </div>
+                {/* Review USD Value */}
+                {usdValue && (
+                  <div style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                    ≈${usdValue}
+                  </div>
+                )}
               </div>
 
               {/* Compact Details */}
@@ -673,7 +867,7 @@ export function SendTransactionModal({
             </>
           )}
         </div>
-      </div >
-    </div >
+      </div>
+    </div>
   );
 }

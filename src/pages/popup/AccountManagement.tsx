@@ -5,12 +5,12 @@ import type { AccountInfo } from '../../shared/types';
 
 interface ModalProps {
     onClose: () => void;
-    onSuccess: () => void;
+    onSuccess: (newAccountAddress?: string) => void;
 }
 
 import { RestoreWalletModal } from './RestoreWalletModal';
 
-export function AddWalletModal({ onClose, onSuccess }: ModalProps) {
+export function AddWalletModal({ onClose, onSuccess, onConnectLedger, onConnectTrezor }: ModalProps & { onConnectLedger?: () => void, onConnectTrezor?: () => void }) {
     const [mode, setMode] = useState<'select' | 'create' | 'import-seed' | 'import-pk'>('select');
     const [value, setValue] = useState('');
     const [label, setLabel] = useState('');
@@ -70,13 +70,15 @@ export function AddWalletModal({ onClose, onSuccess }: ModalProps) {
                 type = 'privateKey';
             }
 
-            const res = await sendMessage<{ success: boolean; error?: string }>({
+            const res = await sendMessage<{ success: boolean; accounts?: AccountInfo[]; error?: string }>({
                 type: 'manaswap:addKeySource',
                 payload: { type, value: payloadValue, label: label || undefined },
             });
 
             if (res.success) {
-                onSuccess();
+                // Auto-select the new account (or the first one if multiple returned, though usually one for these recursive add types)
+                const newAddress = res.accounts && res.accounts.length > 0 ? res.accounts[0].address : undefined;
+                onSuccess(newAddress);
                 onClose();
             } else {
                 setError(res.error || 'Failed to add wallet');
@@ -110,6 +112,22 @@ export function AddWalletModal({ onClose, onSuccess }: ModalProps) {
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Import a single account</span>
                     </div>
                 </button>
+                {onConnectLedger && (
+                    <button className="btn-secondary" onClick={onConnectLedger} style={{ justifyContent: 'flex-start', padding: '16px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                            <span style={{ fontWeight: '600' }}>Connect Ledger</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Connect hardware wallet</span>
+                        </div>
+                    </button>
+                )}
+                {onConnectTrezor && (
+                    <button className="btn-secondary" onClick={onConnectTrezor} style={{ justifyContent: 'flex-start', padding: '16px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                            <span style={{ fontWeight: '600' }}>Connect Trezor</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Connect hardware wallet</span>
+                        </div>
+                    </button>
+                )}
             </div>
             <button className="btn-secondary" onClick={onClose} style={{ marginTop: '16px', width: '100%' }}>Cancel</button>
         </>
@@ -286,13 +304,15 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
                 accounts: [{ address: account.address, derivationPath: account.derivationPath }]
             });
 
-            const res = await sendMessage<{ success: boolean; error?: string }>({
+            const res = await sendMessage<{ success: boolean; accounts?: AccountInfo[]; error?: string }>({
                 type: 'manaswap:addKeySource',
                 payload: { type: 'ledger', value: ledgerData, label: 'Ledger Account' }
             });
 
             if (res.success) {
-                onSuccess();
+                // Auto-select
+                const newAddress = res.accounts && res.accounts.length > 0 ? res.accounts[0].address : undefined;
+                onSuccess(newAddress);
                 onClose();
             } else {
                 setError(res.error || 'Failed to add Ledger account');
@@ -360,11 +380,118 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
     );
 }
 
+import { getTrezorAccounts } from '../../extension/trezor';
+
+export function TrezorConnectModal({ onClose, onSuccess }: ModalProps) {
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [accounts, setAccounts] = useState<any[]>([]);
+    const [step, setStep] = useState<'connect' | 'select'>('connect');
+
+    const handleConnect = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            // Direct call to Trezor Connect (WebHID/WebUSB requires UI context)
+            const retrievedAccounts = await getTrezorAccounts(0, 5);
+            setAccounts(retrievedAccounts);
+            setStep('select');
+        } catch (e: any) {
+            setError(e.message || 'Failed to connect. Make sure Trezor Bridge is running if needed.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSelect = async (account: { address: string; derivationPath: string }) => {
+        setIsLoading(true);
+        try {
+            // Add the Trezor account to the vault using addKeySource
+            const trezorData = JSON.stringify({
+                accounts: [{ address: account.address, derivationPath: account.derivationPath }]
+            });
+
+            const res = await sendMessage<{ success: boolean; accounts?: AccountInfo[]; error?: string }>({
+                type: 'manaswap:addKeySource',
+                payload: { type: 'trezor', value: trezorData, label: 'Trezor Account' }
+            });
+
+            if (res.success) {
+                // Auto-select
+                const newAddress = res.accounts && res.accounts.length > 0 ? res.accounts[0].address : undefined;
+                onSuccess(newAddress);
+                onClose();
+            } else {
+                setError(res.error || 'Failed to add Trezor account');
+            }
+        } catch (e: any) {
+            setError(e.message || 'Failed to add account');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 100,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'
+        }} onClick={onClose}>
+            <div style={{
+                background: 'var(--bg-secondary)', width: '100%', maxWidth: '360px',
+                borderRadius: '24px', padding: '24px', border: '1px solid var(--card-border)'
+            }} onClick={e => e.stopPropagation()}>
+                <h3 style={{ margin: '0 0 16px', textAlign: 'center' }}>Connect Trezor</h3>
+
+                {step === 'connect' ? (
+                    <>
+                        <div style={{ textAlign: 'center', marginBottom: '20px', color: 'var(--text-secondary)' }}>
+                            <p>1. Connect your Trezor device</p>
+                            <p>2. Follow instructions on the popup</p>
+                        </div>
+                        {error && <div className="error-msg" style={{ marginBottom: '16px' }}>{error}</div>}
+                        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                            <button className="btn-secondary" onClick={onClose}>Cancel</button>
+                            <button className="btn-primary" onClick={handleConnect} disabled={isLoading}>
+                                {isLoading ? 'Connecting...' : 'Connect'}
+                            </button>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <h4 style={{ margin: '0 0 12px' }}>Select Account</h4>
+                        <div style={{ maxHeight: '240px', overflowY: 'auto', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {accounts.map((acc, i) => (
+                                <div
+                                    key={acc.address}
+                                    onClick={() => handleSelect(acc)}
+                                    style={{
+                                        padding: '12px',
+                                        background: 'var(--card-bg)',
+                                        borderRadius: '12px',
+                                        cursor: 'pointer',
+                                        border: '1px solid var(--card-border)'
+                                    }}
+                                >
+                                    <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Account {i + 1}</div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{acc.address}</div>
+                                </div>
+                            ))}
+                        </div>
+                        <button className="btn-secondary" onClick={() => setStep('connect')} style={{ width: '100%' }}>Back</button>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () => void; onAccountsChanged?: () => void }) {
     const [accounts, setAccounts] = useState<AccountInfo[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [showAddWallet, setShowAddWallet] = useState(false);
     const [showLedger, setShowLedger] = useState(false);
+    const [showTrezor, setShowTrezor] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<AccountInfo | null>(null);
 
     const loadAccounts = async () => {
@@ -410,7 +537,7 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
                     accounts.map(acc => (
                         <div key={acc.address} className="account-item" onClick={() => handleSwitch(acc.address)}>
                             <div className="account-icon">
-                                {acc.type === 'ledger' ? <Icons.Hardware size={16} /> : <Icons.Wallet size={16} />}
+                                {(acc.type === 'ledger' || acc.type === 'trezor') ? <Icons.Hardware size={16} /> : <Icons.Wallet size={16} />}
                             </div>
                             <div className="account-info">
                                 <div className="account-label">{acc.label || 'Wallet'}</div>
@@ -438,15 +565,30 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
                 <button className="btn-secondary" onClick={() => setShowLedger(true)}>
                     <Icons.Hardware /> Connect Ledger
                 </button>
+                <button className="btn-secondary" onClick={() => setShowTrezor(true)}>
+                    <Icons.Hardware /> Connect Trezor
+                </button>
             </div>
 
             {showAddWallet && (
                 <AddWalletModal
                     onClose={() => setShowAddWallet(false)}
-                    onSuccess={() => {
+                    onSuccess={(newAccountAddress) => {
                         setShowAddWallet(false);
                         loadAccounts();
-                        onAccountsChanged?.();
+                        if (newAccountAddress) {
+                            handleSwitch(newAccountAddress);
+                        } else {
+                            onAccountsChanged?.();
+                        }
+                    }}
+                    onConnectLedger={() => {
+                        setShowAddWallet(false);
+                        setShowLedger(true);
+                    }}
+                    onConnectTrezor={() => {
+                        setShowAddWallet(false);
+                        setShowTrezor(true);
                     }}
                 />
             )}
@@ -454,10 +596,29 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
             {showLedger && (
                 <LedgerConnectModal
                     onClose={() => setShowLedger(false)}
-                    onSuccess={() => {
+                    onSuccess={(newAccountAddress) => {
                         setShowLedger(false);
                         loadAccounts();
-                        onAccountsChanged?.();
+                        if (newAccountAddress) {
+                            handleSwitch(newAccountAddress);
+                        } else {
+                            onAccountsChanged?.();
+                        }
+                    }}
+                />
+            )}
+
+            {showTrezor && (
+                <TrezorConnectModal
+                    onClose={() => setShowTrezor(false)}
+                    onSuccess={(newAccountAddress) => {
+                        setShowTrezor(false);
+                        loadAccounts();
+                        if (newAccountAddress) {
+                            handleSwitch(newAccountAddress);
+                        } else {
+                            onAccountsChanged?.();
+                        }
                     }}
                 />
             )}

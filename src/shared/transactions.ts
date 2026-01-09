@@ -56,6 +56,112 @@ async function sendAndConfirmWithPolling(
 /**
  * Sends SOL from one address to another
  */
+/**
+ * Creates a SOL transfer transaction
+ */
+export async function createSolTransferTransaction(
+  fromPubkey: PublicKey,
+  toAddress: string,
+  amount: number, // Amount in SOL
+  connection: Connection
+): Promise<Transaction> {
+  const toPublicKey = new PublicKey(toAddress);
+  const lamports = Math.floor(amount * 1_000_000_000);
+
+  const transaction = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey,
+      toPubkey: toPublicKey,
+      lamports,
+    })
+  );
+
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = fromPubkey;
+
+  return transaction;
+}
+
+/**
+ * Creates an SPL token transfer transaction
+ */
+export async function createSplTokenTransferTransaction(
+  fromPubkey: PublicKey,
+  toAddress: string,
+  amount: number, // Amount in token units
+  tokenMint: string,
+  decimals: number,
+  connection: Connection
+): Promise<Transaction> {
+  const mintPubkey = new PublicKey(tokenMint);
+  const toPublicKey = new PublicKey(toAddress);
+
+  // Detect which token program this mint uses
+  const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
+  if (!mintAccountInfo) {
+    throw new Error('Mint account not found');
+  }
+
+
+  const programId = mintAccountInfo.owner;
+
+  const fromAta = await getAssociatedTokenAddress(
+    mintPubkey,
+    fromPubkey,
+    false,
+    programId
+  );
+  const toAta = await getAssociatedTokenAddress(
+    mintPubkey,
+    toPublicKey,
+    false,
+    programId
+  );
+
+  const rawAmount = BigInt(Math.floor(amount * Math.pow(10, decimals)));
+  const transaction = new Transaction();
+
+  // Check if recipient's ATA exists
+  try {
+    await getAccount(connection, toAta, 'confirmed', programId);
+  } catch (error) {
+    if (error instanceof TokenAccountNotFoundError) {
+      transaction.add(
+        createAssociatedTokenAccountInstruction(
+          fromPubkey,
+          toAta,
+          toPublicKey,
+          mintPubkey,
+          programId
+        )
+      );
+    } else {
+      throw error;
+    }
+  }
+
+  transaction.add(
+    createTransferInstruction(
+      fromAta,
+      toAta,
+      fromPubkey,
+      rawAmount,
+      [],
+      programId
+    )
+  );
+
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = fromPubkey;
+
+  return transaction;
+}
+
+/**
+ * Sends SOL from one address to another
+ */
 export async function sendSol(
   fromKeypair: Keypair,
   toAddress: string,
@@ -65,26 +171,13 @@ export async function sendSol(
   const config = getNetworkConfig(networkId);
   const connection = new Connection(config.rpcUrl, 'confirmed');
 
-  const toPublicKey = new PublicKey(toAddress);
-
-  // Convert SOL to lamports
-  const lamports = Math.floor(amount * 1_000_000_000);
-
-  // Create transaction
-  const transaction = new Transaction().add(
-    SystemProgram.transfer({
-      fromPubkey: fromKeypair.publicKey,
-      toPubkey: toPublicKey,
-      lamports,
-    })
+  const transaction = await createSolTransferTransaction(
+    fromKeypair.publicKey,
+    toAddress,
+    amount,
+    connection
   );
 
-  // Get recent blockhash
-  const { blockhash } = await connection.getLatestBlockhash('confirmed');
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = fromKeypair.publicKey;
-
-  // Send and confirm with polling (service worker compatible)
   return sendAndConfirmWithPolling(connection, transaction, [fromKeypair]);
 }
 
@@ -102,85 +195,15 @@ export async function sendSplToken(
   const config = getNetworkConfig(networkId);
   const connection = new Connection(config.rpcUrl, 'confirmed');
 
-  const mintPubkey = new PublicKey(tokenMint);
-  const toPublicKey = new PublicKey(toAddress);
-
-  // Detect which token program this mint uses (SPL Token vs Token-2022)
-  const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
-  if (!mintAccountInfo) {
-    throw new Error('Mint account not found');
-  }
-
-  // Token-2022 program ID: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
-  // SPL Token program ID: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
-  const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
-  const programId = mintAccountInfo.owner;
-  const isToken2022 = programId.equals(TOKEN_2022_PROGRAM_ID);
-
-  console.log(`[sendSplToken] Mint: ${tokenMint}, Program: ${programId.toBase58()}, isToken2022: ${isToken2022}`);
-
-  // Get Associated Token Addresses using the correct program ID
-  const fromAta = await getAssociatedTokenAddress(
-    mintPubkey,
+  const transaction = await createSplTokenTransferTransaction(
     fromKeypair.publicKey,
-    false, // allowOwnerOffCurve
-    programId // Use detected program ID
-  );
-  const toAta = await getAssociatedTokenAddress(
-    mintPubkey,
-    toPublicKey,
-    false,
-    programId
+    toAddress,
+    amount,
+    tokenMint,
+    decimals,
+    connection
   );
 
-  console.log(`[sendSplToken] From ATA: ${fromAta.toBase58()}, To ATA: ${toAta.toBase58()}`);
-
-  // Convert amount to raw token units
-  const rawAmount = BigInt(Math.floor(amount * Math.pow(10, decimals)));
-
-  // Create transaction
-  const transaction = new Transaction();
-
-  // Check if recipient's ATA exists, if not create it
-  try {
-    await getAccount(connection, toAta, 'confirmed', programId);
-    console.log(`[sendSplToken] Recipient ATA exists`);
-  } catch (error) {
-    if (error instanceof TokenAccountNotFoundError) {
-      console.log(`[sendSplToken] Creating recipient ATA`);
-      // Create ATA for recipient using correct program ID
-      transaction.add(
-        createAssociatedTokenAccountInstruction(
-          fromKeypair.publicKey, // payer
-          toAta, // ata address
-          toPublicKey, // owner
-          mintPubkey, // mint
-          programId // Use detected program ID
-        )
-      );
-    } else {
-      throw error;
-    }
-  }
-
-  // Add transfer instruction with correct program ID
-  transaction.add(
-    createTransferInstruction(
-      fromAta, // source
-      toAta, // destination
-      fromKeypair.publicKey, // owner
-      rawAmount, // amount
-      [], // multiSigners
-      programId // Use detected program ID
-    )
-  );
-
-  // Get recent blockhash
-  const { blockhash } = await connection.getLatestBlockhash('confirmed');
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = fromKeypair.publicKey;
-
-  // Send and confirm with polling (service worker compatible)
   return sendAndConfirmWithPolling(connection, transaction, [fromKeypair]);
 }
 

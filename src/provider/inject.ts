@@ -244,6 +244,8 @@ declare global {
   interface Window {
     manaswap?: ManaswapProvider;
     solana?: ManaswapProvider;
+    sol?: ManaswapProvider;
+    x1?: ManaswapProvider;
   }
 }
 
@@ -253,10 +255,21 @@ declare global {
   }
   const provider = new ManaswapProvider();
   window.manaswap = provider;
+  window.x1 = provider;
 
   // Also expose as window.solana for compatibility
   if (!window.solana) {
     window.solana = provider;
+  }
+
+  // Expose as window.sol (Short alias)
+  if (!window.sol) {
+    window.sol = provider;
+  }
+
+  // Expose as window.x1 (X1 Network alias)
+  if (!window.x1) {
+    window.x1 = provider;
   }
 
   // Register Wallet Standard

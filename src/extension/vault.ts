@@ -317,6 +317,8 @@ export function getAccountKeypair(address: string): Keypair {
         return Keypair.fromSecretKey(secretKey);
       } else if (source.type === 'ledger') {
         throw new Error('Cannot get keypair for Ledger account - use hardware signing');
+      } else if (source.type === 'trezor') {
+        throw new Error('Cannot get keypair for Trezor account - use hardware signing');
       }
     }
   }
@@ -604,7 +606,7 @@ export async function discoverAccounts(connection: any): Promise<number> {
   return totalDiscovered;
 }
 
-export async function addKeySource(type: KeySourceType, value?: string, label?: string): Promise<void> {
+export async function addKeySource(type: KeySourceType, value?: string, label?: string): Promise<AccountInfo[]> {
   if (!keyring) throw new Error('Vault is locked');
 
   if (type === 'mnemonic') {
@@ -629,19 +631,25 @@ export async function addKeySource(type: KeySourceType, value?: string, label?: 
     const derived = derivePath(path, Buffer.from(seed).toString('hex'));
     const kp = Keypair.fromSeed(derived.key);
 
+    const newAccount: AccountInfo = {
+      address: kp.publicKey.toBase58(),
+      index: 0,
+      label: label || 'Wallet 1',
+      type: 'derived',
+      sourceId: sourceId
+    };
+
     keyring.sources.push({
       id: sourceId,
       type: 'mnemonic',
       value: mnemonic,
       label: label || `Wallet ${keyring.sources.length + 1}`,
-      accounts: [{
-        address: kp.publicKey.toBase58(),
-        index: 0,
-        label: label || 'Wallet 1',
-        type: 'derived',
-        sourceId: sourceId
-      }]
+      accounts: [newAccount]
     });
+
+    await saveVault();
+    return [newAccount];
+
   } else if (type === 'privateKey') {
     // Handle private key import
     if (!value) {
@@ -692,19 +700,25 @@ export async function addKeySource(type: KeySourceType, value?: string, label?: 
     }
 
     const sourceId = crypto.randomUUID();
+    const newAccount: AccountInfo = {
+      address,
+      index: -1,
+      label: label || `Imported ${address.slice(0, 4)}...`,
+      type: 'imported',
+      sourceId: sourceId
+    };
+
     keyring.sources.push({
       id: sourceId,
       type: 'privateKey',
       value: value,
       label: label || `Imported ${address.slice(0, 4)}...`,
-      accounts: [{
-        address,
-        index: -1,
-        label: label || `Imported ${address.slice(0, 4)}...`,
-        type: 'imported',
-        sourceId: sourceId
-      }]
+      accounts: [newAccount]
     });
+
+    await saveVault();
+    return [newAccount];
+
   } else if (type === 'ledger') {
     // Handle Ledger hardware wallet
     // Value should be JSON: { accounts: [{ address, derivationPath }] }
@@ -749,11 +763,61 @@ export async function addKeySource(type: KeySourceType, value?: string, label?: 
       label: label || 'Ledger Hardware Wallet',
       accounts
     });
+
+    await saveVault();
+    return accounts;
+
+  } else if (type === 'trezor') {
+    // Handle Trezor hardware wallet
+    // Value should be JSON: { accounts: [{ address, derivationPath }] }
+    if (!value) {
+      throw new Error('Trezor account data is required');
+    }
+
+    let trezorData: { accounts: Array<{ address: string; derivationPath: string }> };
+    try {
+      trezorData = JSON.parse(value);
+    } catch (e) {
+      throw new Error('Invalid trezor data format');
+    }
+
+    if (!trezorData.accounts || !Array.isArray(trezorData.accounts) || trezorData.accounts.length === 0) {
+      throw new Error('No trezor accounts provided');
+    }
+
+    // Check for duplicates
+    for (const acc of trezorData.accounts) {
+      for (const source of keyring.sources) {
+        if (source.accounts.some(a => a.address === acc.address)) {
+          throw new Error(`Account ${acc.address.slice(0, 8)}... already exists`);
+        }
+      }
+    }
+
+    const sourceId = crypto.randomUUID();
+    const accounts: AccountInfo[] = trezorData.accounts.map((acc, idx) => ({
+      address: acc.address,
+      index: idx,
+      label: label || `Trezor ${idx + 1}`,
+      type: 'trezor' as const,
+      derivationPath: acc.derivationPath,
+      sourceId: sourceId
+    }));
+
+    keyring.sources.push({
+      id: sourceId,
+      type: 'trezor',
+      value: '', // Don't store anything sensitive for trezor
+      label: label || 'Trezor Hardware Wallet',
+      accounts
+    });
+
+    await saveVault();
+    return accounts;
+
   } else {
     throw new Error('Unsupported key source type');
   }
-
-  await saveVault();
 }
 
 export async function setAccountLabel(address: string, label: string): Promise<void> {

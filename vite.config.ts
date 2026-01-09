@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
     crx({ manifest }),
     nodePolyfills({
-      include: ['buffer', 'crypto', 'stream', 'util'],
+      include: ['buffer', 'crypto', 'stream', 'util', 'vm', 'fs', 'os', 'path'],
       globals: {
         Buffer: true,
         global: true,
@@ -17,6 +17,13 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    alias: {
+      stream: 'stream-browserify',
+      crypto: 'crypto-browserify',
+    },
+    dedupe: ['@solana/web3.js', 'bn.js', 'buffer'],
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
