@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { sendMessage } from '../../shared/messaging';
 import { Icons } from '../../shared/ui';
+import { LedgerConnectModal, TrezorConnectModal } from './AccountManagement';
 
-type FlowStep = 'welcome' | 'create-password' | 'backup-mnemonic' | 'import-mnemonic';
+type FlowStep = 'welcome' | 'create-password' | 'backup-mnemonic' | 'import-mnemonic' | 'import-privkey';
 
 export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState<FlowStep>('welcome');
@@ -14,6 +15,9 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [backedUpConfirmed, setBackedUpConfirmed] = useState(false);
   const [mnemonicLength, setMnemonicLength] = useState<12 | 24>(12);
   const [mnemonicWords, setMnemonicWords] = useState<string[]>(Array(12).fill(''));
+  const [privateKey, setPrivateKey] = useState('');
+  const [showLedgerModal, setShowLedgerModal] = useState(false);
+  const [showTrezorModal, setShowTrezorModal] = useState(false);
 
   // Reset mnemonic words array when length changes
   useEffect(() => {
@@ -57,6 +61,57 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const handleStartImport = () => {
     setError('');
     setStep('import-mnemonic');
+  };
+
+  const handleStartImportPK = () => {
+    setError('');
+    setStep('import-privkey');
+  };
+
+  const handleImportPrivateKey = async () => {
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    if (password !== confirm) {
+      setError('Passwords do not match');
+      return;
+    }
+    if (!privateKey.trim()) {
+      setError('Please enter a private key');
+      return;
+    }
+
+    setIsBusy(true);
+    setError('');
+
+    try {
+      // First create vault with password
+      const vaultRes = await sendMessage<{ success: boolean; error?: string }>({
+        type: 'manaswap:createVault',
+        payload: { password }
+      });
+
+      if (!vaultRes.success) {
+        throw new Error(vaultRes.error || 'Failed to create vault');
+      }
+
+      // Then import the private key
+      const res = await sendMessage<{ success: boolean; error?: string }>({
+        type: 'manaswap:addKeySource',
+        payload: { type: 'privateKey', value: privateKey.trim(), label: 'Imported Account' }
+      });
+
+      if (res.success) {
+        onComplete();
+      } else {
+        setError(res.error || 'Failed to import private key');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Import failed');
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   const handleCreateVault = async () => {
@@ -226,9 +281,77 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               fontWeight: '600',
             }}
           >
-            Import Existing Wallet
+            Import Recovery Phrase
           </button>
+          <button
+            onClick={handleStartImportPK}
+            className="btn-secondary"
+            style={{
+              padding: '16px',
+              fontSize: '1rem',
+              fontWeight: '600',
+            }}
+          >
+            Import Private Key
+          </button>
+
+          <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+            <button
+              onClick={() => setShowLedgerModal(true)}
+              className="btn-secondary"
+              style={{
+                flex: 1,
+                padding: '14px',
+                fontSize: '0.9rem',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+              }}
+            >
+              <Icons.Hardware size={18} />
+              Ledger
+            </button>
+            <button
+              onClick={() => setShowTrezorModal(true)}
+              className="btn-secondary"
+              style={{
+                flex: 1,
+                padding: '14px',
+                fontSize: '0.9rem',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+              }}
+            >
+              <Icons.Hardware size={18} />
+              Trezor
+            </button>
+          </div>
         </div>
+
+        {showLedgerModal && (
+          <LedgerConnectModal
+            onClose={() => setShowLedgerModal(false)}
+            onSuccess={() => {
+              setShowLedgerModal(false);
+              onComplete();
+            }}
+          />
+        )}
+
+        {showTrezorModal && (
+          <TrezorConnectModal
+            onClose={() => setShowTrezorModal(false)}
+            onSuccess={() => {
+              setShowTrezorModal(false);
+              onComplete();
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -678,6 +801,153 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
             <>
               <div className="loading-spinner" style={{ width: '18px', height: '18px' }} />
               <span>Importing wallet...</span>
+            </>
+          ) : (
+            <span>Import Wallet</span>
+          )}
+        </button>
+      </div>
+    );
+  }
+
+  if (step === 'import-privkey') {
+    return (
+      <div style={{ padding: '24px', height: '100%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <button
+            onClick={() => setStep('welcome')}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              padding: '8px',
+              marginBottom: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '0.9rem',
+            }}
+          >
+            ← Back
+          </button>
+          <h2 style={{ margin: '0 0 8px 0', fontSize: '1.5rem', fontWeight: '700' }}>Import Private Key</h2>
+          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.9rem' }}>
+            Enter your private key and set a password
+          </p>
+        </div>
+
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', fontWeight: '500' }}>
+              Private Key
+            </label>
+            <textarea
+              placeholder="Enter private key (Base58 or JSON array format)"
+              value={privateKey}
+              onChange={(e) => {
+                setPrivateKey(e.target.value);
+                setError('');
+              }}
+              style={{
+                width: '100%',
+                padding: '14px 16px',
+                background: 'var(--card-bg)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '12px',
+                color: 'var(--text-primary)',
+                fontSize: '0.9rem',
+                fontFamily: 'monospace',
+                height: '80px',
+                resize: 'none',
+              }}
+            />
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              Supports Base58 or JSON array format [x,x,x,...]
+            </p>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', fontWeight: '500' }}>
+              Set Password
+            </label>
+            <input
+              type="password"
+              placeholder="Enter password (min 8 characters)"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError('');
+              }}
+              style={{
+                width: '100%',
+                padding: '14px 16px',
+                background: 'var(--card-bg)',
+                border: error && error.includes('Password') ? '2px solid var(--danger-color)' : '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '12px',
+                color: 'var(--text-primary)',
+                fontSize: '1rem',
+                marginBottom: '12px',
+              }}
+            />
+            <input
+              type="password"
+              placeholder="Confirm password"
+              value={confirm}
+              onChange={(e) => {
+                setConfirm(e.target.value);
+                setError('');
+              }}
+              style={{
+                width: '100%',
+                padding: '14px 16px',
+                background: 'var(--card-bg)',
+                border: error && error.includes('match') ? '2px solid var(--danger-color)' : '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '12px',
+                color: 'var(--text-primary)',
+                fontSize: '1rem',
+              }}
+            />
+          </div>
+
+          {error && (
+            <div style={{
+              padding: '12px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '8px',
+              color: 'var(--danger-color)',
+              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}>
+              <Icons.Warning />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={handleImportPrivateKey}
+          disabled={isBusy || !privateKey.trim() || !password || password !== confirm || password.length < 8}
+          className="btn-primary"
+          style={{
+            width: '100%',
+            padding: '14px',
+            fontSize: '1rem',
+            fontWeight: '600',
+            marginTop: '24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+          }}
+        >
+          {isBusy ? (
+            <>
+              <div className="loading-spinner" style={{ width: '18px', height: '18px' }} />
+              <span>Importing...</span>
             </>
           ) : (
             <span>Import Wallet</span>

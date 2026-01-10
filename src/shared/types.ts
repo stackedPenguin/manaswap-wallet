@@ -65,6 +65,7 @@ export interface TokenBalance {
   name?: string;
   logoURI?: string;
   usdValue?: number;
+  isVerified?: boolean; // True if token is on Jupiter strict list
 }
 
 export interface AccountBalance {

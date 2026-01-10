@@ -70,6 +70,11 @@ export const FALLBACK_TOKENS: JupiterToken[] = [
     }
 ];
 
+// X1 Verified Token Whitelist (only tokens we trust on X1)
+export const X1_VERIFIED_TOKENS = new Set([
+    'B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq', // USDC.X
+]);
+
 async function fetchWithTimeout(url: string, timeout = 5000): Promise<Response> {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
@@ -309,7 +314,7 @@ async function fetchOnChainMetadata(connection: Connection, mint: string): Promi
     }
 }
 
-export async function fetchUserTokens(connection: Connection, publicKey: string): Promise<TokenBalance[]> {
+export async function fetchUserTokens(connection: Connection, publicKey: string, isX1: boolean = false): Promise<TokenBalance[]> {
     try {
         const [splAccounts, token2022Accounts] = await Promise.all([
             connection.getParsedTokenAccountsByOwner(
@@ -345,6 +350,8 @@ export async function fetchUserTokens(connection: Connection, publicKey: string)
             if (amount === '0') return null;
 
             let metadata = metadataMap.get(mint);
+            // For X1: only verified if in X1 whitelist; For Solana: verified if in Jupiter list
+            const isVerified = isX1 ? X1_VERIFIED_TOKENS.has(mint) : !!metadata;
 
             // Fallback: Fetch on-chain metadata if missing
             if (!metadata) {
@@ -360,6 +367,11 @@ export async function fetchUserTokens(connection: Connection, publicKey: string)
                 }
             }
 
+            // Check for URL in name/symbol (common spam pattern)
+            const hasUrlInName = metadata?.name && /https?:\/\/|\.com|\.io|\.xyz|\.net/.test(metadata.name);
+            const hasUrlInSymbol = metadata?.symbol && /https?:\/\/|\.com|\.io|\.xyz|\.net/.test(metadata.symbol);
+            const isSpamByUrl = hasUrlInName || hasUrlInSymbol;
+
             return {
                 mint,
                 amount,
@@ -367,6 +379,7 @@ export async function fetchUserTokens(connection: Connection, publicKey: string)
                 symbol: metadata?.symbol,
                 name: metadata?.name,
                 logoURI: metadata?.logoURI,
+                isVerified: isVerified && !isSpamByUrl, // Only verified if on strict list AND no URL spam
             } as TokenBalance;
         }));
 

@@ -192,4 +192,6 @@ export function getChainId(networkId: NetworkClusterId): number {
   return 101; // Solana Mainnet-beta
 }
 
-
+export function isX1Network(networkId: NetworkClusterId): boolean {
+  return networkId.startsWith('x1-');
+}

@@ -14,6 +14,10 @@ import { StakingPage } from './StakingPage';
 import { getStakeAccountsForWallet, getX1RpcUrl } from '../../shared/staking';
 import { TokenDetails } from './TokenDetails';
 import { DefiPositions } from './DefiPositions';
+import { ReceivePage } from './ReceiveModal';
+import { SwapPage } from './SwapPage';
+import { SendTransactionModal } from './SendTransactionModal';
+import type { TokenInfo } from './SendTransactionModal';
 import { Skeleton, Icons } from '../../shared/ui';
 import { createChart, ColorType, AreaSeries } from 'lightweight-charts';
 import type { PortfolioDataPoint } from '../../shared/portfolio';
@@ -378,6 +382,7 @@ export function MainWallet() {
   const [showChart, setShowChart] = useState(true);
   const [chartInterval, setChartInterval] = useState<'48h' | '1w' | '1m'>('48h');
   const [stakedAmount, setStakedAmount] = useState(0);
+  const [hideUnverifiedTokens, setHideUnverifiedTokens] = useState(true); // Hide spam/unverified by default
 
   // Auto-dismiss toast after 3 seconds
   useEffect(() => {
@@ -955,6 +960,11 @@ export function MainWallet() {
 
     // 2. Add SPL Tokens (for selected network only)
     balance.tokens.forEach(t => {
+      // Skip unverified tokens if hiding is enabled
+      if (hideUnverifiedTokens && t.isVerified === false) {
+        return;
+      }
+
       // For X1, tokens don't have price API support - use 0 for now
       const price = selectedNetwork.kind === 'x1' ? 0 : (prices.get(t.mint) || 0);
       const amount = Number(t.amount) / Math.pow(10, t.decimals);
@@ -1023,7 +1033,7 @@ export function MainWallet() {
 
     // Sort by USD value descending
     return assets.sort((a, b) => b.value - a.value);
-  }, [balances, prices, selectedNetwork, perpsPositions, driftPositions]);
+  }, [balances, prices, selectedNetwork, perpsPositions, driftPositions, hideUnverifiedTokens]);
 
   useEffect(() => {
     if (view === 'home' && unifiedAssets.length > 0 && selectedAccount && selectedNetwork) {
@@ -1271,6 +1281,63 @@ export function MainWallet() {
           return result.signature || '';
         }}
         showToast={(message, type) => setToast({ message, type })}
+      />
+    );
+  }
+
+  if (view === 'receive' && selectedAccount && selectedNetwork) {
+    return (
+      <ReceivePage
+        address={selectedAccount.address}
+        networkId={selectedNetwork.id}
+        onBack={() => setView('home')}
+      />
+    );
+  }
+
+  if (view === 'swap' && selectedAccount && selectedNetwork) {
+    return (
+      <SwapPage
+        userTokens={unifiedAssets.filter(a => a.type === 'token').map(a => a.token!)}
+        userAddress={selectedAccount.address}
+        currentNetworkId={selectedNetwork.id}
+        onSuccess={() => {
+          setView('home');
+          loadAllBalances();
+          setToast({ message: 'Swap successful!', type: 'success' });
+        }}
+        onBack={() => setView('home')}
+      />
+    );
+  }
+
+  if (view === 'send' && selectedAccount && selectedNetwork) {
+    const nativeBalance = balances.get(selectedNetwork.id)?.solBalance || 0;
+    const availableTokens: TokenInfo[] = unifiedAssets
+      .filter(a => a.type === 'token' && a.token && a.token.symbol)
+      .map(a => ({
+        mint: a.token!.mint,
+        symbol: a.token!.symbol || '',
+        name: a.token!.name || a.token!.symbol || '',
+        logoURI: a.token!.logoURI,
+        decimals: a.token!.decimals,
+        balance: Number(a.token!.amount) / Math.pow(10, a.token!.decimals),
+        price: prices.get(a.token!.mint),
+      }));
+
+    return (
+      <SendTransactionModal
+        accountAddress={selectedAccount.address}
+        accounts={accounts}
+        networkId={selectedNetwork.id}
+        defaultBalance={nativeBalance}
+        availableTokens={availableTokens}
+        onClose={() => setView('home')}
+        onSuccess={(sig) => {
+          setView('home');
+          loadAllBalances();
+          setToast({ message: sig ? `Sent! ${sig.slice(0, 8)}...` : 'Transaction sent!', type: 'success' });
+        }}
       />
     );
   }
@@ -1529,6 +1596,42 @@ export function MainWallet() {
                   )}
                 </button>
               </div>
+
+              {/* Spam Filter Toggle - Show count of hidden tokens */}
+              {(() => {
+                const balance = selectedNetwork ? balances.get(selectedNetwork.id) : undefined;
+                const hiddenCount = balance?.tokens.filter(t => t.isVerified === false).length || 0;
+                if (hiddenCount > 0) {
+                  return (
+                    <button
+                      onClick={() => setHideUnverifiedTokens(!hideUnverifiedTokens)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 16px',
+                        background: hideUnverifiedTokens ? 'rgba(234, 179, 8, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                        border: '1px solid',
+                        borderColor: hideUnverifiedTokens ? 'rgba(234, 179, 8, 0.3)' : 'rgba(59, 130, 246, 0.3)',
+                        borderRadius: '8px',
+                        color: hideUnverifiedTokens ? 'var(--warning-color)' : 'var(--accent-color)',
+                        fontSize: '0.75rem',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        marginBottom: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <Icons.Warning size={12} />
+                      {hideUnverifiedTokens
+                        ? `${hiddenCount} unverified token${hiddenCount > 1 ? 's' : ''} hidden`
+                        : `Showing ${hiddenCount} unverified token${hiddenCount > 1 ? 's' : ''}`}
+                    </button>
+                  );
+                }
+                return null;
+              })()}
 
               {/* Unified Asset List */}
               {isLoadingBalance && balances.size === 0 ? (
