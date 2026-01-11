@@ -106,7 +106,17 @@ export async function fetchTokenMetadataMap(): Promise<Map<string, JupiterToken>
         // console.log('Fetching tokens from Jupiter API...');
         const response = await fetchWithTimeout(JUPITER_TOKEN_LIST_URL);
         if (response.ok) {
-            tokens = await response.json();
+            const rawTokens = await response.json();
+            // V2 API uses 'id' instead of 'address' and 'icon' instead of 'logoURI'
+            tokens = rawTokens.map((t: any) => ({
+                address: t.id || t.address,
+                chainId: 101, // Solana mainnet
+                decimals: t.decimals,
+                name: t.name,
+                symbol: t.symbol,
+                logoURI: t.icon || t.logoURI || '',
+                tags: t.tags || []
+            }));
             // console.log(`Loaded ${tokens.length} tokens from Jupiter`);
         } else {
             throw new Error(`Jupiter API returned ${response.status}`);
