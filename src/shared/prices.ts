@@ -49,10 +49,11 @@ export interface DexScreenerResponse {
     pairs: DexScreenerPair[];
 }
 
-// Jupiter Price API v2 (public, no auth required)
+// Jupiter Price API V3 (requires API key)
 
 const DEXSCREENER_API_URL = 'https://api.dexscreener.com/latest/dex/tokens';
-const JUPITER_PRICE_API_V2_URL = 'https://api.jup.ag/price/v2';
+const JUPITER_PRICE_API_URL = 'https://api.jup.ag/price/v3';
+const JUPITER_API_KEY = import.meta.env.VITE_JUPITER_ULTRA_API_KEY || '';
 
 async function fetchDexScreenerPrices(mints: string[]): Promise<Map<string, number>> {
     if (mints.length === 0) return new Map();
@@ -105,13 +106,17 @@ async function fetchDexScreenerPrices(mints: string[]): Promise<Map<string, numb
 async function fetchJupiterPrices(mints: string[]): Promise<Map<string, number>> {
     if (mints.length === 0) return new Map();
 
-    // Jupiter Price API v2 supports up to 100 mints (public, no auth required)
+    // Jupiter Price API V3 supports batching
     const chunkedMints = mints.slice(0, 100);
     const ids = chunkedMints.join(',');
-    const url = `${JUPITER_PRICE_API_V2_URL}?ids=${ids}`;
+    const url = `${JUPITER_PRICE_API_URL}?ids=${ids}`;
 
     try {
-        const response = await fetch(url, { cache: 'no-store' });
+        const headers: HeadersInit = {};
+        if (JUPITER_API_KEY) {
+            headers['x-api-key'] = JUPITER_API_KEY;
+        }
+        const response = await fetch(url, { cache: 'no-store', headers });
 
         if (!response.ok) {
             throw new Error(`Jupiter Price API error: ${response.status}`);
@@ -120,12 +125,12 @@ async function fetchJupiterPrices(mints: string[]): Promise<Map<string, number>>
         const data = await response.json();
         const priceMap = new Map<string, number>();
 
-        // v2 response format: { data: { "mint": { "price": "123.45" } } }
-        if (data?.data) {
-            Object.entries(data.data).forEach(([mint, priceData]: [string, any]) => {
-                const price = priceData?.price;
-                if (price) {
-                    priceMap.set(mint, parseFloat(price.toString()));
+        // V3 response format: { "mint": { "usdPrice": 123.45, "decimals": 9, ... } }
+        if (data) {
+            Object.entries(data).forEach(([mint, priceData]: [string, any]) => {
+                const price = priceData?.usdPrice;
+                if (typeof price === 'number') {
+                    priceMap.set(mint, price);
                 }
             });
         }

@@ -36,3 +36,6 @@ manaswap-wallet-extension.zip
 
 x1-staking_test/
 demo_wallet.html
+
+# Android app is in separate repo
+android/

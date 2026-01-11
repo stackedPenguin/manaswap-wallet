@@ -3,8 +3,8 @@ import { getTokenMetadata } from '@solana/spl-token';
 import type { TokenBalance } from './types';
 import { getSolanaRpcUrl } from './env';
 
-// Jupiter Token List API (V1 Strict) - Updated endpoint
-const JUPITER_TOKEN_LIST_URL = 'https://tokens.jup.ag/tokens?tags=strict';
+// Jupiter Token List API V2 (verified tokens)
+const JUPITER_TOKEN_LIST_URL = 'https://api.jup.ag/tokens/v2/tag?query=verified';
 // Fallback: Solana Labs Token List
 const SOLANA_LABS_TOKEN_LIST_URL = 'https://raw.githubusercontent.com/solana-labs/token-list/main/src/tokens/solana.tokenlist.json';
 
