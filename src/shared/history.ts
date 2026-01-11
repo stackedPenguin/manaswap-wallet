@@ -1,6 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import type { TransactionActivity } from './types';
 import type { NetworkClusterId } from './networks';
+import { getSolanaRpcUrl } from './env';
 
 interface HeliusEnhancedTransaction {
     signature: string;
@@ -108,7 +109,7 @@ export async function fetchTransactionHistory(
         }
 
         // Extract API Key from RPC URL
-        const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || '';
+        const rpcUrl = getSolanaRpcUrl();
         const apiKeyMatch = rpcUrl.match(/api-key=([^&]+)/);
 
         if (apiKeyMatch && apiKeyMatch[1]) {
@@ -286,7 +287,7 @@ export async function fetchBalanceChanges(
     // Default: Solana via Helius
     const effectiveNetworkId = networkId || 'solana-mainnet';
     try {
-        const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || '';
+        const rpcUrl = getSolanaRpcUrl();
         const apiKeyMatch = rpcUrl.match(/api-key=([^&]+)/);
 
         if (!apiKeyMatch || !apiKeyMatch[1]) {

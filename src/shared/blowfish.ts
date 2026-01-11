@@ -2,6 +2,7 @@
 // Replaces Blowfish (which requires API key) with Helius RPC
 
 import { useState, useEffect, useCallback } from 'react';
+import { getHeliusApiKey } from './env';
 
 // Simulation result types (compatible with existing UI)
 export interface BlowfishEvaluation {
@@ -90,10 +91,9 @@ async function getSimulationRpcUrl(networkId?: NetworkClusterId): Promise<string
         }
 
         // For Solana networks, prefer Helius if API key is present
-        // First try Vite env variable
-        const apiKey = (import.meta as any)?.env?.VITE_HELIUS_API_KEY;
+        const apiKey = getHeliusApiKey();
         if (apiKey) {
-            console.log('[Simulation] Using VITE_HELIUS_API_KEY from env');
+            console.log('[Simulation] Using Helius API key from env');
             return `https://mainnet.helius-rpc.com/?api-key=${apiKey}`;
         }
 

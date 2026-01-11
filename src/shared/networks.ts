@@ -1,4 +1,5 @@
 import { Connection } from '@solana/web3.js';
+import { getSolanaRpcUrl } from './env';
 
 export type NetworkClusterId =
   | 'solana-mainnet'
@@ -33,7 +34,7 @@ export const NETWORKS: NetworkConfig[] = [
   {
     id: 'solana-mainnet',
     label: 'Solana Mainnet',
-    rpcUrl: import.meta.env.VITE_SOLANA_RPC_URL || 'https://rpc.ankr.com/solana',
+    rpcUrl: getSolanaRpcUrl(),
     explorerUrl: 'https://explorer.solana.com',
     kind: 'solana',
     environment: 'mainnet',

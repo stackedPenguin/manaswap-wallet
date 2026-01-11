@@ -960,8 +960,8 @@ export function MainWallet() {
 
     // 2. Add SPL Tokens (for selected network only)
     balance.tokens.forEach(t => {
-      // Skip unverified tokens if hiding is enabled
-      if (hideUnverifiedTokens && t.isVerified === false) {
+      // Skip unverified tokens if hiding is enabled (includes undefined isVerified)
+      if (hideUnverifiedTokens && !t.isVerified) {
         return;
       }
 
@@ -1600,7 +1600,7 @@ export function MainWallet() {
               {/* Spam Filter Toggle - Show count of hidden tokens */}
               {(() => {
                 const balance = selectedNetwork ? balances.get(selectedNetwork.id) : undefined;
-                const hiddenCount = balance?.tokens.filter(t => t.isVerified === false).length || 0;
+                const hiddenCount = balance?.tokens.filter(t => !t.isVerified).length || 0;
                 if (hiddenCount > 0) {
                   return (
                     <button

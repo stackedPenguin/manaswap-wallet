@@ -49,11 +49,10 @@ export interface DexScreenerResponse {
     pairs: DexScreenerPair[];
 }
 
-// Jupiter Price API v3 Interface
-
+// Jupiter Price API v2 (public, no auth required)
 
 const DEXSCREENER_API_URL = 'https://api.dexscreener.com/latest/dex/tokens';
-const JUPITER_PRICE_API_V3_URL = 'https://api.jup.ag/price/v3/get';
+const JUPITER_PRICE_API_V2_URL = 'https://api.jup.ag/price/v2';
 
 async function fetchDexScreenerPrices(mints: string[]): Promise<Map<string, number>> {
     if (mints.length === 0) return new Map();
@@ -106,49 +105,31 @@ async function fetchDexScreenerPrices(mints: string[]): Promise<Map<string, numb
 async function fetchJupiterPrices(mints: string[]): Promise<Map<string, number>> {
     if (mints.length === 0) return new Map();
 
-    // Jupiter Price API v3 supports up to 100 mints
+    // Jupiter Price API v2 supports up to 100 mints (public, no auth required)
     const chunkedMints = mints.slice(0, 100);
     const ids = chunkedMints.join(',');
-    const url = `${JUPITER_PRICE_API_V3_URL}?ids=${ids}&vsToken=USDC`;
+    const url = `${JUPITER_PRICE_API_V2_URL}?ids=${ids}`;
 
     try {
-        // console.log(`[Prices] Fetching prices from Jupiter API v3: ${url}`);
-
-        const apiKey = import.meta.env.VITE_JUPITER_ULTRA_API_KEY;
-        const headers: HeadersInit = {};
-        if (apiKey) {
-            headers['x-api-key'] = apiKey;
-        }
-
-        const response = await fetch(url, {
-            cache: 'no-store',
-            headers
-        });
+        const response = await fetch(url, { cache: 'no-store' });
 
         if (!response.ok) {
-            throw new Error(`Jupiter Price API v3 error: ${response.status}`);
+            throw new Error(`Jupiter Price API error: ${response.status}`);
         }
 
         const data = await response.json();
         const priceMap = new Map<string, number>();
 
-        // V3 response is a direct map: { "mint": { "price": ... } }
-        // Note: The response format might vary slightly based on docs vs reality.
-        // Based on reproduction script output:
-        // { "So111...": { "usdPrice": 135.37, ... } }
-        // Wait, the reproduction script showed "usdPrice". Let's double check the interface.
-
-        if (data) {
-            Object.entries(data).forEach(([mint, priceData]: [string, any]) => {
-                // Check for 'price' or 'usdPrice'
-                const price = priceData?.price || priceData?.usdPrice;
+        // v2 response format: { data: { "mint": { "price": "123.45" } } }
+        if (data?.data) {
+            Object.entries(data.data).forEach(([mint, priceData]: [string, any]) => {
+                const price = priceData?.price;
                 if (price) {
                     priceMap.set(mint, parseFloat(price.toString()));
                 }
             });
         }
 
-        // console.log(`[Prices] Parsed ${priceMap.size} prices from Jupiter API v3`);
         return priceMap;
     } catch (error) {
         console.error('Failed to fetch Jupiter prices:', error);

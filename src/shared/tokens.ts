@@ -1,6 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { getTokenMetadata } from '@solana/spl-token';
 import type { TokenBalance } from './types';
+import { getSolanaRpcUrl } from './env';
 
 // Jupiter Token List API (V1 Strict)
 const JUPITER_TOKEN_LIST_URL = 'https://token.jup.ag/strict';
@@ -161,7 +162,7 @@ interface HeliusAssetResponse {
 }
 
 async function fetchHeliusMetadata(mint: string): Promise<JupiterToken | null> {
-    const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL;
+    const rpcUrl = getSolanaRpcUrl();
     if (!rpcUrl || !rpcUrl.includes('helius')) return null;
 
     try {

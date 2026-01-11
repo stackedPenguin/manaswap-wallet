@@ -24,7 +24,7 @@ export interface EncryptedVault {
   salt: string;
 }
 
-export type KeySourceType = 'mnemonic' | 'privateKey' | 'ledger' | 'trezor';
+export type KeySourceType = 'mnemonic' | 'privateKey' | 'ledger';
 
 export interface KeySource {
   id: string;
@@ -52,8 +52,8 @@ export interface AccountInfo {
   address: string;
   index: number; // For derived accounts
   label?: string;
-  type: 'derived' | 'imported' | 'ledger' | 'trezor';
-  derivationPath?: string; // For Ledger/Trezor
+  type: 'derived' | 'imported' | 'ledger';
+  derivationPath?: string; // For Ledger hardware wallets
   sourceId?: string; // ID of the KeySource this account belongs to
 }
 
@@ -118,11 +118,7 @@ export type PendingRequest =
   // Ledger hardware wallet requests - handled by popup doing WebHID signing
   | (PendingRequestBase & { type: 'ledger-sign-transaction'; payload: number[]; derivationPath: string })
   | (PendingRequestBase & { type: 'ledger-sign-message'; payload: number[]; derivationPath: string })
-  | (PendingRequestBase & { type: 'ledger-sign-and-send'; payload: number[]; derivationPath: string; options?: { skipPreflight?: boolean } })
-  // Trezor hardware wallet requests - handled by popup doing Connect signing
-  | (PendingRequestBase & { type: 'trezor-sign-transaction'; payload: number[]; derivationPath: string })
-  | (PendingRequestBase & { type: 'trezor-sign-message'; payload: number[]; derivationPath: string })
-  | (PendingRequestBase & { type: 'trezor-sign-and-send'; payload: number[]; derivationPath: string; options?: { skipPreflight?: boolean } });
+  | (PendingRequestBase & { type: 'ledger-sign-and-send'; payload: number[]; derivationPath: string; options?: { skipPreflight?: boolean } });
 
 // Re-export NetworkHealth for convenience
 export type { NetworkHealth } from './networks';
@@ -161,7 +157,6 @@ export type ManaswapMessage =
   | { type: 'manaswap:setAccountLabel'; payload: { address: string; label: string } }
   | { type: 'manaswap:deleteAccount'; payload: { address: string } }
   | { type: 'manaswap:getLedgerAccounts'; payload: { pathStart?: number; limit?: number } }
-  | { type: 'manaswap:getTrezorAccounts'; payload: { pathStart?: number; limit?: number } }
   // Network Health Messages
   | { type: 'manaswap:checkNetworkHealth'; payload: { networkId: NetworkClusterId } }
   | { type: 'manaswap:checkAllNetworkHealth' }
@@ -199,16 +194,8 @@ export type ManaswapMessage =
   | { type: 'manaswap:getTransactionHistory'; payload: { address: string; networkId: NetworkClusterId; limit?: number } }
   | { type: 'manaswap:executeSwap'; payload: { swapTransactionBase64: string } }
   | { type: 'manaswap:getPortfolioHistory'; payload: { address: string; networkId: NetworkClusterId } }
-  // Ledger/Trezor Messages
+  // Ledger Messages
   | { type: 'manaswap:ledgerSignResult'; payload: { requestId: string; signature: number[] } }
-  | {
-    type: 'manaswap:trezorSignResult';
-    payload: {
-      success: boolean;
-      signature?: string;
-      error?: string;
-    };
-  }
   | {
     type: 'manaswap:broadcastTransaction';
     payload: {
