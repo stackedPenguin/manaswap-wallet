@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { getTokenMetadata } from '@solana/spl-token';
 import type { TokenBalance } from './types';
-import { getSolanaRpcUrl, getJupiterApiKey } from './env';
+import { getSolanaRpcUrl } from './env';
 
 // Jupiter Token List API V2 (verified tokens)
 const JUPITER_TOKEN_LIST_URL = 'https://api.jup.ag/tokens/v2/tag?query=verified';
@@ -82,8 +82,8 @@ export const SOLANA_CORE_VERIFIED = new Set([
     'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
     'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
 ]);
-// Jupiter API key from environment for authentication
-const JUPITER_API_KEY = getJupiterApiKey();
+// Jupiter API key - use direct import.meta.env for build-time inlining
+const JUPITER_API_KEY = import.meta.env.VITE_JUPITER_ULTRA_API_KEY || '';
 
 async function fetchWithTimeout(url: string, timeout = 5000): Promise<Response> {
     const controller = new AbortController();
