@@ -82,12 +82,18 @@ export const SOLANA_CORE_VERIFIED = new Set([
     'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
     'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
 ]);
+// Jupiter API key from environment
+const JUPITER_API_KEY = import.meta.env.VITE_JUPITER_ULTRA_API_KEY || '';
 
 async function fetchWithTimeout(url: string, timeout = 5000): Promise<Response> {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
     try {
-        const response = await fetch(url, { signal: controller.signal });
+        const headers: HeadersInit = {};
+        if (JUPITER_API_KEY && url.includes('jup.ag')) {
+            headers['x-api-key'] = JUPITER_API_KEY;
+        }
+        const response = await fetch(url, { signal: controller.signal, headers });
         clearTimeout(id);
         return response;
     } catch (error) {
