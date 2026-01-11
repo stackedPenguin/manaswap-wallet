@@ -19,7 +19,7 @@
 - [ ] Add custom RPC
 
 ## Token & Balance
-- [x] Native SOL balance displays ✅ (0.0376 SOL)
+- [x] Native SOL balance displays ✅ (0.0366 SOL)
 - [x] Native XNT balance displays (X1) ✅
 - [x] SPL token balances display ✅ (USDC verified)
 - [x] Token prices load from API ✅ (Jupiter Price V3)
@@ -28,15 +28,15 @@
 - [x] **Unverified tokens hidden by default** ✅
 
 ## Transactions
-- [ ] Send SOL
+- [x] Send SOL ✅ (0.001 SOL sent successfully)
 - [ ] Send SPL token
-- [ ] Transaction history loads
-- [ ] Transaction links to explorer
+- [x] Transaction history loads ✅
+- [ ] Transaction links to explorer ❌ (not implemented)
 
 ## DeFi Features (Solana Mainnet)
-- [ ] Jupiter perps positions display
-- [ ] Drift positions display
-- [ ] DeFi tab shows positions
+- [X] Jupiter perps positions display
+- [X] Drift positions display
+- [X] DeFi tab shows positions
 
 ## Staking (X1 Network)
 - [ ] Staking page loads on X1
@@ -55,5 +55,8 @@
 
 ---
 **Version:** 0.1.1  
-**Last Tested:** 2026-01-10 23:31 CST  
-**Notes:** Fixed Jupiter API (V2/V3) and env var build-time inlining
+**Last Tested:** 2026-01-11 08:32 CST  
+**Notes:** 
+- Fixed Jupiter API (V2/V3) and env var build-time inlining
+- Transaction send verified working (0.001 SOL)
+- Explorer links from tx history not yet implemented
