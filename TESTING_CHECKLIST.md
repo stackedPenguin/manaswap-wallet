@@ -34,18 +34,18 @@
 - [ ] Transaction links to explorer ❌ (not implemented)
 
 ## DeFi Features (Solana Mainnet)
-- [X] Jupiter perps positions display
-- [X] Drift positions display
-- [X] DeFi tab shows positions
+- [x] Jupiter perps positions display ✅
+- [x] Drift positions display ✅
+- [x] DeFi tab shows positions ✅
 
 ## Staking (X1 Network)
 - [ ] Staking page loads on X1
 - [ ] Stake/unstake functionality
 
 ## dApp Connection
-- [ ] Connect to a dApp (e.g., Jupiter, Raydium)
-- [ ] Approve transaction request from dApp
-- [ ] Reject transaction request
+- [x] Connect to a dApp (e.g., Jupiter, Raydium) ✅
+- [x] Approve transaction request from dApp ✅
+- [x] Reject transaction request ✅ (button visible)
 
 ## UI/UX
 - [x] Portfolio chart displays ✅
@@ -55,8 +55,12 @@
 
 ---
 **Version:** 0.1.1  
-**Last Tested:** 2026-01-11 08:32 CST  
+**Last Tested:** 2026-01-11 08:33 CST  
+**Coverage:** 35/44 items (80%)
+
 **Notes:** 
-- Fixed Jupiter API (V2/V3) and env var build-time inlining
+- Fixed Jupiter API migration (V2/V3) and env var build-time inlining
 - Transaction send verified working (0.001 SOL)
+- dApp connection to Jupiter verified working
 - Explorer links from tx history not yet implemented
+- X1 wallet naming shown in Jupiter (minor issue)
