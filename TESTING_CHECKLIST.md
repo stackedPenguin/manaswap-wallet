@@ -1,8 +1,8 @@
 # Manaswap Wallet v0.1.1 - Pre-Production Testing Checklist
 
-## Core Views (Fixed This Session)
+## Core Views
 - [x] **Receive** - QR code displays correctly ✅
-- [x] **Swap** - Token selector and quote fetching work ✅ (API unreachable in test env, but UI handles gracefully)
+- [x] **Swap** - Token selector and quote fetching work ✅ (Jupiter Ultra API)
 - [x] **Send** - Transaction modal opens and submits ✅
 
 ## Wallet Management
@@ -19,12 +19,12 @@
 - [ ] Add custom RPC
 
 ## Token & Balance
-- [x] Native SOL balance displays ✅
+- [x] Native SOL balance displays ✅ (0.0376 SOL)
 - [x] Native XNT balance displays (X1) ✅
-- [x] SPL token balances display ✅
-- [x] Token prices load from API ✅
+- [x] SPL token balances display ✅ (USDC verified)
+- [x] Token prices load from API ✅ (Jupiter Price V3)
 - [x] Refresh balances works ✅
-- [x] **Spam filter toggle shows hidden token count** ✅
+- [x] **Spam filter toggle** ✅ (1 hidden token)
 - [x] **Unverified tokens hidden by default** ✅
 
 ## Transactions
@@ -55,5 +55,5 @@
 
 ---
 **Version:** 0.1.1  
-**Build Date:** 2026-01-09
-**Last Tested:** 2026-01-10
+**Last Tested:** 2026-01-10 23:31 CST  
+**Notes:** Fixed Jupiter API (V2/V3) and env var build-time inlining
