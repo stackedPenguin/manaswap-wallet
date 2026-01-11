@@ -24,7 +24,7 @@ export interface EncryptedVault {
   salt: string;
 }
 
-export type KeySourceType = 'mnemonic' | 'privateKey' | 'ledger';
+export type KeySourceType = 'mnemonic' | 'privateKey' | 'ledger' | 'trezor';
 
 export interface KeySource {
   id: string;
@@ -52,7 +52,7 @@ export interface AccountInfo {
   address: string;
   index: number; // For derived accounts
   label?: string;
-  type: 'derived' | 'imported' | 'ledger';
+  type: 'derived' | 'imported' | 'ledger' | 'trezor';
   derivationPath?: string; // For Ledger hardware wallets
   sourceId?: string; // ID of the KeySource this account belongs to
 }
@@ -213,4 +213,6 @@ export type ManaswapMessage =
   }
   // dApp Network Messages
   | { type: 'manaswap:dappGetNetwork'; payload: { origin: string } }
-  | { type: 'manaswap:dappSwitchChain'; payload: { origin: string; networkId: string } };
+  | { type: 'manaswap:dappSwitchChain'; payload: { origin: string; networkId: string } }
+  // Trezor Messages
+  | { type: 'manaswap:getTrezorAccounts' };

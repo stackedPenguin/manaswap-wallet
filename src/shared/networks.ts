@@ -180,8 +180,8 @@ export async function checkNetworkHealth(
 }
 
 // XDEX API Endpoints
-// Solana: Uses Jupiter Aggregator (Open Routing)
-export const XDEX_SOLANA_API = 'https://quote-api.jup.ag/v6';
+// Jupiter Ultra API for Solana swaps (replaces deprecated quote-api.jup.ag/v6)
+export const JUPITER_ULTRA_API = 'https://api.jup.ag/ultra/v1';
 
 // X1: Uses Custom XDEX Aggregator (Forked from Jupiter Metis)
 

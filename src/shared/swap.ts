@@ -1,6 +1,8 @@
-import { XDEX_SOLANA_API, XDEX_X1_API, getNetworkConfig, type NetworkClusterId } from './networks';
+import { JUPITER_ULTRA_API, XDEX_X1_API, getNetworkConfig, type NetworkClusterId } from './networks';
 import { fetchTokenMetadataMap, FALLBACK_TOKENS } from './tokens'; // Import for decimal lookup
 
+// Jupiter Ultra API key from environment
+const JUPITER_API_KEY = import.meta.env.VITE_JUPITER_ULTRA_API_KEY || '';
 
 export interface QuoteResponse {
     inputMint: string;
@@ -12,8 +14,8 @@ export interface QuoteResponse {
     slippageBps: number;
     priceImpactPct: string;
     routePlan: any[];
-    transaction?: string; // Some APIs return it here
-    requestId?: string;
+    transaction?: string; // Base64 encoded transaction from Ultra API
+    requestId?: string; // Required for Ultra execute
     platformFee?: {
         amount: string;
         feeBps: number;
@@ -25,8 +27,7 @@ export interface QuoteResponse {
     }
 }
 
-// 0.05% Platform Fee (Revenue Vault)
-const PLATFORM_FEE_BPS = 5;
+// Platform fee is configured per referral account on Jupiter Ultra
 
 export async function getSwapQuote(
     networkId: NetworkClusterId,
@@ -34,35 +35,57 @@ export async function getSwapQuote(
     outputMint: string,
     amount: number, // Atomic units
     slippageBps: number = 50, // Default 0.5%
-    _userPublicKey?: string // Required for X1/XDEX API (unused in client-side quote mode)
+    userPublicKey?: string // Required for Ultra API to get transaction
 ): Promise<QuoteResponse> {
     const config = getNetworkConfig(networkId);
-    let baseUrl: string;
 
     if (config.kind === 'solana') {
-        baseUrl = XDEX_SOLANA_API;
-
-        // Jupiter v6 /quote endpoint
+        // Jupiter Ultra API /order endpoint
         const params = new URLSearchParams({
             inputMint,
             outputMint,
             amount: amount.toString(),
-            slippageBps: slippageBps.toString(),
-            platformFeeBps: PLATFORM_FEE_BPS.toString(),
         });
-        const url = `${baseUrl}/quote?${params.toString()}`;
-        console.log(`[Swap] Fetching quote from ${config.kind} (${url})`);
+
+        // Add taker (user wallet) if provided - required to get transaction back
+        if (userPublicKey) {
+            params.set('taker', userPublicKey);
+        }
+
+        // Add referral fee if desired
+        // params.set('referralFee', PLATFORM_FEE_BPS.toString());
+
+        const url = `${JUPITER_ULTRA_API}/order?${params.toString()}`;
+        console.log(`[Swap] Fetching Ultra quote from ${url}`);
 
         try {
-            const response = await fetch(url);
+            const headers: HeadersInit = {};
+            if (JUPITER_API_KEY) {
+                headers['x-api-key'] = JUPITER_API_KEY;
+            }
+            const response = await fetch(url, { headers });
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
-                throw new Error(`Swap API Error: ${response.status} ${err.error || err.message || ''}`);
+                throw new Error(`Jupiter Ultra API Error: ${response.status} ${err.error || err.message || ''}`);
             }
             const data = await response.json();
-            return data as QuoteResponse;
+
+            // Map Ultra API response to our QuoteResponse format
+            return {
+                inputMint: data.inputMint || inputMint,
+                inAmount: data.inAmount || amount.toString(),
+                outputMint: data.outputMint || outputMint,
+                outAmount: data.outAmount || '0',
+                otherAmountThreshold: data.otherAmountThreshold || '0',
+                swapMode: data.swapType || 'ExactIn',
+                slippageBps: data.slippageBps || slippageBps,
+                priceImpactPct: data.priceImpactPct || '0',
+                routePlan: data.routePlan || [],
+                transaction: data.transaction, // Base64 encoded, ready to sign
+                requestId: data.requestId, // Needed for /execute
+            } as QuoteResponse;
         } catch (e: any) {
-            console.error('[Swap] Jupiter quote failed:', e);
+            console.error('[Swap] Jupiter Ultra quote failed:', e);
             throw e;
         }
 
@@ -352,30 +375,49 @@ export async function getSwapTransaction(
     userPublicKey: string
 ): Promise<{ swapTransaction: string }> {
     const config = getNetworkConfig(networkId);
-    let baseUrl: string;
 
     if (config.kind === 'solana') {
-        baseUrl = XDEX_SOLANA_API;
-    } else {
-        baseUrl = XDEX_X1_API;
+        // Jupiter Ultra API: transaction is already in the quote response
+        // If we have a transaction from the order, use it directly
+        if (quoteResponse.transaction) {
+            console.log('[Swap] Using transaction from Ultra order response');
+            return { swapTransaction: quoteResponse.transaction };
+        }
+
+        // If no transaction (e.g., taker wasn't provided in order), we need to call order again with taker
+        // This shouldn't happen if getSwapQuote was called with userPublicKey
+        console.log('[Swap] No transaction in quote, fetching Ultra order with taker...');
+        const params = new URLSearchParams({
+            inputMint: quoteResponse.inputMint,
+            outputMint: quoteResponse.outputMint,
+            amount: quoteResponse.inAmount,
+            taker: userPublicKey,
+        });
+
+        const url = `${JUPITER_ULTRA_API}/order?${params.toString()}`;
+
+        try {
+            const headers: HeadersInit = {};
+            if (JUPITER_API_KEY) {
+                headers['x-api-key'] = JUPITER_API_KEY;
+            }
+            const response = await fetch(url, { headers });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(`Jupiter Ultra API Error: ${response.status} ${err.error || err.message || ''}`);
+            }
+            const data = await response.json();
+            if (data.transaction) {
+                return { swapTransaction: data.transaction };
+            }
+            throw new Error('No transaction returned from Jupiter Ultra API');
+        } catch (e: any) {
+            console.error('[Swap] Jupiter Ultra transaction fetch failed:', e);
+            throw e;
+        }
     }
 
-    // Jupiter v6 /swap endpoint
-    // POST /swap
-    // Body: { quoteResponse, userPublicKey, ... }
-
-    const body = {
-        quoteResponse,
-        userPublicKey,
-        wrapAndUnwrapSol: true,
-        // FEE ACCOUNTS: To actually collect the platform fee, specific accounts must be provided.
-        // For now, we will omit the specific fee accounts unless we have a defined revenue vault address.
-        // The implementation plan specifies "redirected to the USDC rewards vault".
-        // We would need the address of that vault. 
-        // For this MVP step, we will rely on default behavior or the API handling it based on BPS if configured server-side (unlikely for open generic API).
-        // WE WILL ADD A TODO HERE.
-    };
-
+    // X1 (XDEX)
     if (config.kind === 'x1') {
         const decimals = await getTokenDecimals(quoteResponse.inputMint);
         const humanAmount = Number(quoteResponse.inAmount) / Math.pow(10, decimals);
@@ -413,28 +455,7 @@ export async function getSwapTransaction(
         }
     }
 
-    // Default / Generic (Jupiter-like)
-    const url = `${baseUrl}/swap`;
-    console.log(`[Swap] Fetching transaction from ${config.kind} (${url})`);
-
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(`Swap API Error: ${response.status} ${err.error || err.message || ''}`);
-        }
-
-        const data = await response.json();
-        return { swapTransaction: data.swapTransaction };
-
-    } catch (e: any) {
-        throw e;
-    }
+    throw new Error(`Unsupported network kind: ${config.kind}`);
 }
 
 // Development Mock

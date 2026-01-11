@@ -3,8 +3,8 @@ import { getTokenMetadata } from '@solana/spl-token';
 import type { TokenBalance } from './types';
 import { getSolanaRpcUrl } from './env';
 
-// Jupiter Token List API (V1 Strict)
-const JUPITER_TOKEN_LIST_URL = 'https://token.jup.ag/strict';
+// Jupiter Token List API (V1 Strict) - Updated endpoint
+const JUPITER_TOKEN_LIST_URL = 'https://tokens.jup.ag/tokens?tags=strict';
 // Fallback: Solana Labs Token List
 const SOLANA_LABS_TOKEN_LIST_URL = 'https://raw.githubusercontent.com/solana-labs/token-list/main/src/tokens/solana.tokenlist.json';
 
@@ -74,6 +74,13 @@ export const FALLBACK_TOKENS: JupiterToken[] = [
 // X1 Verified Token Whitelist (only tokens we trust on X1)
 export const X1_VERIFIED_TOKENS = new Set([
     'B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq', // USDC.X
+]);
+
+// Solana Core Verified Tokens (always verified even if Jupiter API fails)
+export const SOLANA_CORE_VERIFIED = new Set([
+    'So11111111111111111111111111111111111111112', // SOL (wrapped)
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
 ]);
 
 async function fetchWithTimeout(url: string, timeout = 5000): Promise<Response> {
@@ -351,8 +358,11 @@ export async function fetchUserTokens(connection: Connection, publicKey: string,
             if (amount === '0') return null;
 
             let metadata = metadataMap.get(mint);
-            // For X1: only verified if in X1 whitelist; For Solana: verified if in Jupiter list
-            const isVerified = isX1 ? X1_VERIFIED_TOKENS.has(mint) : !!metadata;
+            // For X1: only verified if in X1 whitelist
+            // For Solana: verified if in Jupiter list OR in core verified set (fallback)
+            const isVerified = isX1
+                ? X1_VERIFIED_TOKENS.has(mint)
+                : (!!metadata || SOLANA_CORE_VERIFIED.has(mint));
 
             // Fallback: Fetch on-chain metadata if missing
             if (!metadata) {
