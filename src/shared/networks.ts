@@ -1,8 +1,7 @@
 import { Connection } from '@solana/web3.js';
-import { getSolanaRpcUrl } from './env';
 
-// RPC URL - use safe accessor for React Native compatibility
-const SOLANA_RPC_URL = getSolanaRpcUrl();
+// RPC URL - direct import.meta.env for build-time inlining
+const SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
 export type NetworkClusterId =
   | 'solana-mainnet'
