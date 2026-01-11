@@ -1,8 +1,9 @@
 import { JUPITER_ULTRA_API, XDEX_X1_API, getNetworkConfig, type NetworkClusterId } from './networks';
 import { fetchTokenMetadataMap, FALLBACK_TOKENS } from './tokens'; // Import for decimal lookup
+import { getJupiterApiKey } from './env';
 
 // Jupiter Ultra API key from environment
-const JUPITER_API_KEY = import.meta.env.VITE_JUPITER_ULTRA_API_KEY || '';
+const JUPITER_API_KEY = getJupiterApiKey();
 
 export interface QuoteResponse {
     inputMint: string;
