@@ -277,18 +277,11 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
         setIsLoading(true);
         setError(null);
         try {
-            // Request Ledger accounts
-            const res = await sendMessage<{ success: boolean; accounts?: any[]; error?: string }>({
-                type: 'manaswap:getLedgerAccounts',
-                payload: { pathStart: 0, limit: 5 }
-            });
-
-            if (res.success && res.accounts) {
-                setAccounts(res.accounts);
-                setStep('select');
-            } else {
-                setError(res.error || 'Failed to connect to Ledger');
-            }
+            // Call Ledger directly from popup (WebHID requires DOM context)
+            const { getLedgerAccounts } = await import('../../extension/ledger');
+            const retrievedAccounts = await getLedgerAccounts(0, 5);
+            setAccounts(retrievedAccounts);
+            setStep('select');
         } catch (e: any) {
             setError(e.message || 'Failed to connect. Make sure Ledger is unlocked and Solana app is open.');
         } finally {
