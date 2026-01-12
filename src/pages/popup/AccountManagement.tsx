@@ -321,7 +321,18 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
 
                 // Auto-close tab if this was opened via deep link
                 if (new URLSearchParams(window.location.search).get('connectLedger') === 'true') {
-                    window.close();
+                    // Use chrome.tabs API for robust closing
+                    try {
+                        const tab = await chrome.tabs.getCurrent();
+                        if (tab?.id) {
+                            await chrome.tabs.remove(tab.id);
+                        } else {
+                            window.close();
+                        }
+                    } catch (e) {
+                        console.error("Failed to close tab:", e);
+                        window.close();
+                    }
                 }
             } else {
                 setError(res.error || 'Failed to add Ledger account');

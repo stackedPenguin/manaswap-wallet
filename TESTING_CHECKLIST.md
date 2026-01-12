@@ -60,7 +60,9 @@
 **Coverage:** 35/44 items (80%)
 
 ## Hardware Wallet Support
-- [x] Connect Ledger (Auto-opens Full Tab from Popup for stability)
+- [x] Connect Ledger (Auto-opens Full Tab)
+- [x] Connect Ledger (Balance display & text wrap)
+- [x] Connect Ledger (Auto-close expanded tab)
 - [x] Sign Transaction with Ledger
 
 **Notes:** 
