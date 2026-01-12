@@ -283,7 +283,18 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
             setAccounts(retrievedAccounts);
             setStep('select');
         } catch (e: any) {
-            setError(e.message || 'Failed to connect. Make sure Ledger is unlocked and Solana app is open.');
+            console.error('Ledger connect error:', e);
+            let msg = e.message || 'Failed to connect.';
+
+            if (msg.includes('Access denied') || msg.includes('claimed') || msg.includes('cannot be opened')) {
+                msg = 'Access denied. Please CLOSE Ledger Live and other wallet apps, then try again.';
+            } else if (msg.includes('No device selected')) {
+                msg = 'No device selected. Please select your Ledger from the popup.';
+            } else {
+                msg += ' Ensure Ledger is unlocked and Solana app is open.';
+            }
+
+            setError(msg);
         } finally {
             setIsLoading(false);
         }
@@ -311,7 +322,12 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
                 setError(res.error || 'Failed to add Ledger account');
             }
         } catch (e: any) {
-            setError(e.message || 'Failed to add account');
+            console.error('Ledger add account error:', e);
+            let msg = e.message || 'Failed to add account';
+            if (msg.includes('Access denied') || msg.includes('claimed')) {
+                msg = 'Access denied. Close Ledger Live and try again.';
+            }
+            setError(msg);
         } finally {
             setIsLoading(false);
         }
