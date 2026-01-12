@@ -657,7 +657,10 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
                     account={selectedAccount}
                     onClose={() => setSelectedAccount(null)}
                     onSuccess={loadAccounts}
-                    onAccountsChanged={onAccountsChanged}
+                    onAccountsChanged={() => {
+                        loadAccounts();
+                        onAccountsChanged?.();
+                    }}
                 />
             )}
         </div>

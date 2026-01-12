@@ -11,6 +11,7 @@
 - [x] Switch between accounts ✅
 - [x] Copy address to clipboard ✅
 - [ ] View private key (with password confirmation)
+- [x] Delete Wallet (Instant UI refresh)
 
 ## Network Switching
 - [x] Switch to Solana Mainnet ✅
