@@ -359,15 +359,7 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
                                 {isLoading ? 'Connecting...' : 'Connect'}
                             </button>
                         </div>
-                        <div style={{ marginTop: '16px', textAlign: 'center' }}>
-                            <button
-                                className="btn-secondary"
-                                onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('src/pages/popup/index.html') })}
-                                style={{ fontSize: '0.75rem', padding: '8px 12px', width: '100%' }}
-                            >
-                                Trouble connecting? Open Expanded View
-                            </button>
-                        </div>
+                        {/* Expander link removed as per user request (Auto-expand now handled in main view) */}
                     </>
                 ) : (
                     <>
@@ -545,7 +537,7 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
         // Force expanded view for Ledger connection if in popup
         // Chrome closes popups when generic HID picker opens
         if (window.innerWidth < 600) {
-            chrome.tabs.create({ url: chrome.runtime.getURL('index.html?connectLedger=true') });
+            chrome.tabs.create({ url: chrome.runtime.getURL('src/pages/popup/index.html?connectLedger=true') });
             window.close();
             return;
         }
