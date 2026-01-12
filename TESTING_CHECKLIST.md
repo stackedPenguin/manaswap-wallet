@@ -1,4 +1,4 @@
-# Manaswap Wallet v0.1.1 - Pre-Production Testing Checklist
+# Manaswap Wallet v0.1.2 - Pre-Production Testing Checklist
 
 ## Core Views
 - [x] **Receive** - QR code displays correctly ✅
@@ -55,8 +55,8 @@
 - [x] Back navigation works on all screens ✅
 
 ---
-**Version:** 0.1.1  
-**Last Tested:** 2026-01-11 08:33 CST  
+**Version:** 0.1.2
+**Last Tested:** 2026-01-11 08:33 CST
 **Coverage:** 35/44 items (80%)
 
 ## Hardware Wallet Support
@@ -65,7 +65,7 @@
 - [x] Connect Ledger (Auto-close expanded tab)
 - [x] Sign Transaction with Ledger
 
-**Notes:** 
+**Notes:**
 - Fixed Jupiter API migration (V2/V3) and env var build-time inlining
 - Transaction send verified working (0.001 SOL)
 - dApp connection to Jupiter verified working

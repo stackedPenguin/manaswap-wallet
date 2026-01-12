@@ -5,7 +5,7 @@ const manifest = defineManifest({
   name: 'Manaswap Wallet',
   short_name: 'Manaswap',
   description: 'High-performance Solana + X1 wallet with smart network detection.',
-  version: '0.1.1',
+  version: '0.1.2',
   action: {
     default_popup: 'src/pages/popup/index.html',
     default_title: 'Manaswap Wallet',
