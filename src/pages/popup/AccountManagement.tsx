@@ -6,7 +6,7 @@ import type { AccountInfo } from '../../shared/types';
 
 interface ModalProps {
     onClose: () => void;
-    onSuccess: (newAccountAddress?: string) => void;
+    onSuccess: (newAccountAddress?: string) => void | Promise<void>;
 }
 
 import { RestoreWalletModal } from './RestoreWalletModal';
@@ -300,7 +300,7 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
         }
     };
 
-    const handleSelect = async (account: { address: string; derivationPath: string }) => {
+    const handleSelect = async (account: { address: string; derivationPath: string; balance?: number }) => {
         setIsLoading(true);
         try {
             // Add the Ledger account to the vault using addKeySource
@@ -316,8 +316,13 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
             if (res.success) {
                 // Auto-select
                 const newAddress = res.accounts && res.accounts.length > 0 ? res.accounts[0].address : undefined;
-                onSuccess(newAddress);
+                await onSuccess(newAddress); // Await parent logic (saving settings)
                 onClose();
+
+                // Auto-close tab if this was opened via deep link
+                if (new URLSearchParams(window.location.search).get('connectLedger') === 'true') {
+                    window.close();
+                }
             } else {
                 setError(res.error || 'Failed to add Ledger account');
             }
@@ -377,8 +382,22 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
                                         border: '1px solid var(--card-border)'
                                     }}
                                 >
-                                    <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Account {i + 1}</div>
-                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{acc.address}</div>
+                                    <div style={{ fontWeight: '600', fontSize: '0.9rem', marginBottom: '4px' }}>
+                                        Account {i + 1}
+                                    </div>
+                                    <div style={{
+                                        fontSize: '0.75rem',
+                                        color: 'var(--text-secondary)',
+                                        wordBreak: 'break-all',
+                                        lineHeight: '1.4'
+                                    }}>
+                                        {acc.address}
+                                    </div>
+                                    {acc.balance !== undefined && (
+                                        <div style={{ fontSize: '0.75rem', color: '#22c55e', marginTop: '4px', fontWeight: '500' }}>
+                                            {acc.balance.toFixed(4)} SOL
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -617,11 +636,11 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
             {showLedger && (
                 <LedgerConnectModal
                     onClose={() => setShowLedger(false)}
-                    onSuccess={(newAccountAddress) => {
+                    onSuccess={async (newAccountAddress) => {
                         setShowLedger(false);
                         loadAccounts();
                         if (newAccountAddress) {
-                            handleSwitch(newAccountAddress);
+                            await handleSwitch(newAccountAddress);
                         } else {
                             onAccountsChanged?.();
                         }

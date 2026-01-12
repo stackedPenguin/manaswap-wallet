@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Connection } from "@solana/web3.js";
 import TransportWebHID from "@ledgerhq/hw-transport-webhid";
 import AppSolana from "@ledgerhq/hw-app-solana";
 
@@ -60,18 +60,29 @@ export async function getLedgerAccounts(pathStart = 0, limit = 5): Promise<Ledge
     try {
         transport = await createTransportWithRetry();
         const solana = new AppSolana(transport);
+        const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
 
         const accounts: LedgerAccount[] = [];
 
+
+        // Fetch addresses sequentially (Ledger requirement)
+        const derivedAccounts: { address: PublicKey, path: string }[] = [];
         for (let i = pathStart; i < pathStart + limit; i++) {
             const path = `44'/501'/${i}'`; // Ledger standard path
             const { address } = await solana.getAddress(path);
-
-            accounts.push({
-                address: new PublicKey(address).toBase58(),
-                derivationPath: path,
-            });
+            derivedAccounts.push({ address: new PublicKey(address), path });
         }
+
+        // Fetch balances in parallel
+        const balances = await Promise.all(derivedAccounts.map(acc => connection.getBalance(acc.address)));
+
+        derivedAccounts.forEach((acc, i) => {
+            accounts.push({
+                address: acc.address.toBase58(),
+                derivationPath: acc.path,
+                balance: balances[i] / 1e9 // LAMPORTS_PER_SOL
+            });
+        });
 
         return accounts;
     } catch (e) {
