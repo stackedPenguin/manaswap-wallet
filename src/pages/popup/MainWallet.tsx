@@ -394,7 +394,14 @@ export function MainWallet() {
     }
   }, [toast]);
 
-  // ... existing code ...
+  // Check for deep link to Ledger Connect
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('connectLedger') === 'true') {
+      setShowLedgerModal(true);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
 
 

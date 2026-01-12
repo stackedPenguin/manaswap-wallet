@@ -541,6 +541,17 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
         onClose(); // Close modal after selection
     };
 
+    const handleConnectLedger = () => {
+        // Force expanded view for Ledger connection if in popup
+        // Chrome closes popups when generic HID picker opens
+        if (window.innerWidth < 600) {
+            chrome.tabs.create({ url: chrome.runtime.getURL('index.html?connectLedger=true') });
+            window.close();
+            return;
+        }
+        setShowLedger(true);
+    };
+
     return (
         <div className="account-management-modal">
             <div className="modal-header">
@@ -580,7 +591,7 @@ export function AccountManagement({ onClose, onAccountsChanged }: { onClose: () 
                 <button className="btn-secondary" onClick={() => setShowAddWallet(true)}>
                     <Icons.Plus /> Add / Import Wallet
                 </button>
-                <button className="btn-secondary" onClick={() => setShowLedger(true)}>
+                <button className="btn-secondary" onClick={handleConnectLedger}>
                     <Icons.Hardware /> Connect Ledger
                 </button>
                 <button className="btn-secondary" onClick={() => setShowTrezor(true)}>

@@ -59,8 +59,8 @@
 **Coverage:** 35/44 items (80%)
 
 ## Hardware Wallet Support
-- [ ] Connect Ledger (Auto-retry enabled for known devices; Gesture Safe)
-- [ ] Sign Transaction with Ledger
+- [x] Connect Ledger (Auto-opens Full Tab from Popup for stability)
+- [x] Sign Transaction with Ledger
 
 **Notes:** 
 - Fixed Jupiter API migration (V2/V3) and env var build-time inlining
