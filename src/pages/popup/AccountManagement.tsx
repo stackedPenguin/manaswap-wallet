@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Icons } from '../../shared/ui';
 import { sendMessage } from '../../shared/messaging';
+import { getLedgerAccounts } from './ledger';
 import type { AccountInfo } from '../../shared/types';
 
 interface ModalProps {
@@ -278,7 +279,6 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
         setError(null);
         try {
             // Call Ledger directly from popup (WebHID requires DOM context)
-            const { getLedgerAccounts } = await import('../../extension/ledger');
             const retrievedAccounts = await getLedgerAccounts(0, 5);
             setAccounts(retrievedAccounts);
             setStep('select');

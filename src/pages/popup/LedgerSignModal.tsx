@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { signTransactionLedger, signMessageLedger } from '../../extension/ledger';
+import { signTransactionLedger, signMessageLedger } from './ledger';
 
 interface LedgerSignModalProps {
     derivationPath: string;

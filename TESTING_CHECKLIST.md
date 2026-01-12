@@ -59,7 +59,7 @@
 **Coverage:** 35/44 items (80%)
 
 ## Hardware Wallet Support
-- [ ] Connect Ledger (Auto-retry enabled for known devices)
+- [ ] Connect Ledger (Auto-retry enabled for known devices; Gesture Safe)
 - [ ] Sign Transaction with Ledger
 
 **Notes:** 
