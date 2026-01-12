@@ -35,15 +35,22 @@ async function retry<T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T>
 
 async function createTransportWithRetry() {
     const TransportWebHID = (await import("@ledgerhq/hw-transport-webhid")).default;
-    // Use retry wrapper for transport creation
-    return retry(async () => {
-        // First try to open already connected devices to avoid picker if possible
-        const devices = await TransportWebHID.list();
-        if (devices.length > 0 && devices[0].opened) {
-            return TransportWebHID.open(devices[0]);
-        }
-        return TransportWebHID.create();
-    });
+
+    // First try to find already authorized devices
+    const devices = await TransportWebHID.list();
+    if (devices.length > 0) {
+        // We have permission to a device. We can retry opening it.
+        // This is safe because open() on known devices doesn't require a new gesture.
+        return retry(async () => {
+            const freshDevices = await TransportWebHID.list();
+            if (freshDevices.length === 0) throw new Error("Device disconnected");
+            return TransportWebHID.open(freshDevices[0]);
+        });
+    }
+
+    // No permission yet. MUST use user gesture (picker).
+    // CANNOT retry this automatically as it loses the gesture context.
+    return TransportWebHID.create();
 }
 
 export async function getLedgerAccounts(pathStart = 0, limit = 5): Promise<LedgerAccount[]> {

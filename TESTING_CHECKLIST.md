@@ -58,6 +58,10 @@
 **Last Tested:** 2026-01-11 08:33 CST  
 **Coverage:** 35/44 items (80%)
 
+## Hardware Wallet Support
+- [ ] Connect Ledger (Auto-retry enabled for known devices)
+- [ ] Sign Transaction with Ledger
+
 **Notes:** 
 - Fixed Jupiter API migration (V2/V3) and env var build-time inlining
 - Transaction send verified working (0.001 SOL)
