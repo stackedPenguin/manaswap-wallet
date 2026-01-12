@@ -1042,10 +1042,11 @@ export function MainWallet() {
         const account = selectedAccount;
         const balance = balances.get(network.id);
         const xntBalance = balance?.solBalance || 0;
+        const totalXntValue = xntBalance + stakedAmount; // Include staked XNT in portfolio value
         const XNT_PRICE = 1.0;
 
         console.log('[MainWalletDebug] X1 network detected, fetching balance changes...');
-        console.log('[MainWalletDebug] Current XNT balance:', xntBalance);
+        console.log('[MainWalletDebug] Current XNT balance:', xntBalance, 'Staked:', stakedAmount, 'Total:', totalXntValue);
 
         // Fetch x1 balance changes
         import('../../shared/history').then(({ fetchBalanceChanges }) => {
@@ -1073,8 +1074,8 @@ export function MainWallet() {
                 changeIndex++;
               }
 
-              // Value can't be negative (clamp to 0)
-              const value = Math.max(0, currentBalance * XNT_PRICE);
+              // Total value = liquid balance + staked amount (staked treated as constant over history period)
+              const value = Math.max(0, (currentBalance + stakedAmount) * XNT_PRICE);
               history.push({ timestamp: time, value });
             }
 
@@ -1090,7 +1091,7 @@ export function MainWallet() {
             for (let i = 0; i < 168; i++) {
               flatHistory.push({
                 timestamp: fallbackNow - (i * 3600 * 1000),
-                value: xntBalance * XNT_PRICE
+                value: totalXntValue * XNT_PRICE
               });
             }
             setPortfolioHistory(flatHistory.reverse());
@@ -1202,7 +1203,7 @@ export function MainWallet() {
       // Clear history when wallet has no assets
       setPortfolioHistory([]);
     }
-  }, [selectedAccount?.address, unifiedAssets.length]);
+  }, [selectedAccount?.address, unifiedAssets.length, stakedAmount, selectedNetwork?.kind]);
 
   // Helper to get chain icon
   const getChainIcon = (kind: 'solana' | 'x1') => {
