@@ -359,6 +359,15 @@ export function LedgerConnectModal({ onClose, onSuccess }: ModalProps) {
                                 {isLoading ? 'Connecting...' : 'Connect'}
                             </button>
                         </div>
+                        <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                            <button
+                                className="btn-secondary"
+                                onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('src/pages/popup/index.html') })}
+                                style={{ fontSize: '0.75rem', padding: '8px 12px', width: '100%' }}
+                            >
+                                Trouble connecting? Open Expanded View
+                            </button>
+                        </div>
                     </>
                 ) : (
                     <>
