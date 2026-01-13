@@ -1497,13 +1497,10 @@ async function handleDetection(payload: SiteDetectionPayload): Promise<WalletSet
   return next;
 }
 
-async function syncBadge(settings: WalletSettings) {
+async function syncBadge(_settings: WalletSettings) {
   if (!chrome.action) return;
-  const network = getNetworkConfig(settings.selectedNetwork);
-  const label = network.kind === 'x1' ? 'X1' : 'SOL';
-  const color = network.kind === 'x1' ? '#f97316' : '#22d3ee';
-  await chrome.action.setBadgeText({ text: label });
-  await chrome.action.setBadgeBackgroundColor({ color });
+  // Clear badge - don't show network indicator as it covers the logo
+  await chrome.action.setBadgeText({ text: '' });
 }
 
 function normalizeSettings(settings: WalletSettings): WalletSettings {
