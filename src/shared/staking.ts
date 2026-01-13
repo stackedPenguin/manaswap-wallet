@@ -58,6 +58,10 @@ const VALIDATOR_METADATA: Record<string, { name: string; imageUrl: string }> = {
     'X1SPaMUM1A8E1vKL8XQAB5rxKarJbqtWFFSNFs8f7Av': {
         name: 'X1 Foundation',
         imageUrl: '/icons/x1-logo.png'
+    },
+    '5j4dxwQ1F4aecuB87bCseckGyK3uf9p2F7axqLjFvqVq': {
+        name: 'Arctic Digital',
+        imageUrl: 'https://storage.googleapis.com/global-bucket-286202/files/Arctic%20Logo.png'
     }
 };
 

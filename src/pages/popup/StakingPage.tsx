@@ -26,7 +26,22 @@ interface StakingPageProps {
     showToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
-const DEFAULT_VALIDATOR_ADDRESS = 'X1SPaMUM1A8E1vKL8XQAB5rxKarJbqtWFFSNFs8f7Av';
+const ARCTIC_VALIDATOR_ADDRESS = '5j4dxwQ1F4aecuB87bCseckGyK3uf9p2F7axqLjFvqVq';
+const X1_FOUNDATION_ADDRESS = 'X1SPaMUM1A8E1vKL8XQAB5rxKarJbqtWFFSNFs8f7Av';
+const DEFAULT_VALIDATOR_ADDRESS = ARCTIC_VALIDATOR_ADDRESS;
+
+const sortValidators = (vals: ValidatorInfo[]) => {
+    const arctic = vals.find(v => v.voteAccount === ARCTIC_VALIDATOR_ADDRESS);
+    const foundation = vals.find(v => v.voteAccount === X1_FOUNDATION_ADDRESS);
+    const others = vals.filter(v => v.voteAccount !== ARCTIC_VALIDATOR_ADDRESS && v.voteAccount !== X1_FOUNDATION_ADDRESS);
+
+    // Construct list: Arctic, Foundation, ...rest
+    const sticky = [];
+    if (arctic) sticky.push(arctic);
+    if (foundation) sticky.push(foundation);
+
+    return [...sticky, ...others];
+};
 
 export function StakingPage({
     onBack,
@@ -61,7 +76,7 @@ export function StakingPage({
                 connection.getEpochInfo(),
             ]);
 
-            setValidators(vals);
+            setValidators(sortValidators(vals));
             setStakeAccounts(stakes);
 
             const remainingSlots = epochInfo.slotsInEpoch - epochInfo.slotIndex;
@@ -84,7 +99,7 @@ export function StakingPage({
             getValidators(connection, true).then(freshVals => {
                 // Only update if component is still mounted (simple check implied by React state update)
                 // In functional component, setValidators will just work or be ignored if unmounted
-                setValidators(freshVals);
+                setValidators(sortValidators(freshVals));
             }).catch(e => console.warn('[Staking] Background validator refresh failed:', e));
 
         } catch (e) {
@@ -162,13 +177,13 @@ export function StakingPage({
     };
 
     const getValidatorName = (address: string) => {
-        if (address === DEFAULT_VALIDATOR_ADDRESS) return 'X1 Foundation';
+        if (address === X1_FOUNDATION_ADDRESS) return 'X1 Foundation';
         const val = validators.find(v => v.voteAccount === address);
         return val?.name || `${address.slice(0, 8)}...`;
     };
 
     const getValidatorImage = (address: string) => {
-        if (address === DEFAULT_VALIDATOR_ADDRESS) return '/icons/x1-logo.png';
+        if (address === X1_FOUNDATION_ADDRESS) return '/icons/x1-logo.png';
         const val = validators.find(v => v.voteAccount === address);
         return val?.imageUrl;
     };
