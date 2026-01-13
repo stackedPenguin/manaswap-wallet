@@ -3,9 +3,9 @@ import { sendMessage } from '../../shared/messaging';
 import { Icons } from '../../shared/ui';
 import { LedgerConnectModal, TrezorConnectModal } from './AccountManagement';
 
-type FlowStep = 'welcome' | 'create-password' | 'backup-mnemonic' | 'import-mnemonic' | 'import-privkey';
+type FlowStep = 'welcome' | 'create-password' | 'backup-mnemonic' | 'import-mnemonic' | 'import-privkey' | 'success';
 
-export function Onboarding({ onComplete }: { onComplete: () => void }) {
+export function Onboarding({ onComplete: _onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState<FlowStep>('welcome');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -103,7 +103,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
       });
 
       if (res.success) {
-        onComplete();
+        setStep('success');
       } else {
         setError(res.error || 'Failed to import private key');
       }
@@ -183,7 +183,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
       });
 
       if (res.success) {
-        onComplete();
+        setStep('success');
       } else {
         setError(res.error || 'Import failed');
       }
@@ -195,10 +195,10 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   };
 
   const finishBackup = () => {
-    // In a real app, we would force the user to re-enter words to verify backup.
     // For this phase, we trust they backed it up.
-    onComplete();
+    setStep('success');
   };
+
 
   // --- Renders ---
 
@@ -338,7 +338,8 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
             onClose={() => setShowLedgerModal(false)}
             onSuccess={() => {
               setShowLedgerModal(false);
-              onComplete();
+              setShowLedgerModal(false);
+              setStep('success');
             }}
           />
         )}
@@ -348,7 +349,8 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
             onClose={() => setShowTrezorModal(false)}
             onSuccess={() => {
               setShowTrezorModal(false);
-              onComplete();
+              setShowTrezorModal(false);
+              setStep('success');
             }}
           />
         )}
@@ -954,6 +956,108 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
           )}
         </button>
       </div>
+    );
+  }
+
+  if (step === 'success') {
+    return (
+      <div style={{
+        padding: '32px 24px',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center'
+      }}>
+        <div style={{
+          width: '80px',
+          height: '80px',
+          borderRadius: '50%',
+          background: 'rgba(34, 197, 94, 0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: '24px',
+          color: '#4ade80'
+        }}>
+          <Icons.CheckCircle size={48} />
+        </div>
+
+        <h2 style={{ margin: '0 0 16px 0', fontSize: '1.75rem', fontWeight: '700' }}>
+          All Set!
+        </h2>
+
+        <p style={{
+          color: 'var(--text-secondary)',
+          margin: '0 0 32px 0',
+          fontSize: '1rem',
+          lineHeight: '1.6',
+          maxWidth: '300px'
+        }}>
+          Your wallet has been successfully created and is ready to use.
+        </p>
+
+        <div style={{
+          background: 'var(--card-bg)',
+          borderRadius: '12px',
+          padding: '16px',
+          marginBottom: '32px',
+          border: '1px solid var(--card-border)',
+          width: '100%'
+        }}>
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', textAlign: 'left' }}>
+            <div style={{
+              width: '24px',
+              height: '24px',
+              borderRadius: '50%',
+              background: 'var(--text-primary)',
+              color: 'black',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 'bold',
+              fontSize: '0.8rem',
+              flexShrink: 0
+            }}>1</div>
+            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              Click the Manaswap icon in your browser toolbar to access your wallet
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '12px', textAlign: 'left' }}>
+            <div style={{
+              width: '24px',
+              height: '24px',
+              borderRadius: '50%',
+              background: 'var(--text-primary)',
+              color: 'black',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 'bold',
+              fontSize: '0.8rem',
+              flexShrink: 0
+            }}>2</div>
+            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              You may close this window now
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => window.close()}
+          className="btn-primary"
+          style={{
+            width: '100%',
+            padding: '16px',
+            fontSize: '1rem',
+            fontWeight: '600',
+            boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+          }}
+        >
+          Done
+        </button>
+      </div >
     );
   }
 

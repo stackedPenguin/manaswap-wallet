@@ -496,14 +496,32 @@ export function MainWallet() {
   }, [selectedAccount, selectedNetwork]);
 
   const loadAccounts = async () => {
-    const res = await sendMessage<AccountsResponse>({ type: 'manaswap:getAccounts' });
-    if (res.success) {
-      setAccounts(res.accounts);
-      // If selected account is not in list (e.g. after import), select the last one
-      if (selectedAccount && !res.accounts.find(a => a.address === selectedAccount.address)) {
-        setSelectedAccount(res.accounts[res.accounts.length - 1]);
-      } else if (!selectedAccount && res.accounts.length > 0) {
-        setSelectedAccount(res.accounts[0]);
+    // Fetch both accounts and settings to sync selection
+    const [accountsRes, settingsRes] = await Promise.all([
+      sendMessage<AccountsResponse>({ type: 'manaswap:getAccounts' }),
+      sendMessage<RuntimeResponse>({ type: 'manaswap:getSettings' })
+    ]);
+
+    if (accountsRes.success) {
+      setAccounts(accountsRes.accounts);
+      if (settingsRes && settingsRes.settings) {
+        setSettings(settingsRes.settings);
+        // Try to select the account specified in settings
+        const savedAddress = settingsRes.settings.selectedAccountAddress;
+        if (savedAddress) {
+          const acc = accountsRes.accounts.find(a => a.address === savedAddress);
+          if (acc) {
+            setSelectedAccount(acc);
+            return;
+          }
+        }
+      }
+
+      // Fallback logic
+      if (selectedAccount && !accountsRes.accounts.find(a => a.address === selectedAccount.address)) {
+        setSelectedAccount(accountsRes.accounts[accountsRes.accounts.length - 1]);
+      } else if (!selectedAccount && accountsRes.accounts.length > 0) {
+        setSelectedAccount(accountsRes.accounts[0]);
       }
     }
   };

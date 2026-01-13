@@ -283,7 +283,6 @@ async function checkAllNetworksHealth() {
 let isPopupOpening = false;
 
 // Helper to open the extension popup
-// Helper to open the extension popup
 async function openPopup() {
   // Check if any popup window is already open (native or fallback)
   // This is critical because getViews({ type: 'popup' }) only returns native popups

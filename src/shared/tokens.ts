@@ -416,8 +416,8 @@ export async function fetchUserTokens(connection: Connection, publicKey: string,
 
         // console.log(`[Tokens] Returning ${tokens.length} tokens with non-zero balance`);
         return tokens;
-    } catch (error) {
-        console.error('Error fetching user tokens:', error);
+    } catch (error: any) {
+        // console.log('Fetch user tokens failed (likely new account):', error.message);
         // Return tokens without metadata if metadata fetch fails?
         // But we need to know if it was the metadata fetch or the account fetch that failed.
         return [];

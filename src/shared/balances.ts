@@ -22,6 +22,9 @@ async function withRetry<T>(
       }
     }
   }
+  if (lastError) {
+    console.error(`[Balances] withRetry failed after ${maxRetries} attempts:`, lastError);
+  }
   throw lastError;
 }
 
@@ -37,7 +40,14 @@ export async function fetchSolBalance(
   const connection = new Connection(config.rpcUrl, 'confirmed');
   const publicKey = new PublicKey(address);
 
-  const balance = await withRetry(() => connection.getBalance(publicKey));
+  const balance = await withRetry(async () => {
+    try {
+      return await connection.getBalance(publicKey);
+    } catch (e: any) {
+      console.warn(`[Balances] getBalance attempt failed for ${address} on ${config.rpcUrl}:`, e.message, e.cause);
+      throw e;
+    }
+  });
   // Convert lamports to SOL (1 SOL = 1,000,000,000 lamports)
   return balance / LAMPORTS_PER_SOL; // Use LAMPORTS_PER_SOL
 }
@@ -56,13 +66,26 @@ export async function fetchAccountBalance(
   const config = getNetworkConfig(networkId, customNetworks);
   const connection = new Connection(config.rpcUrl, 'confirmed');
 
-  const solBalance = await withRetry(() =>
-    connection.getBalance(new PublicKey(address))
-  );
+  let solBalance = 0;
+  try {
+    const lamports = await withRetry(() =>
+      connection.getBalance(new PublicKey(address))
+    );
+    solBalance = lamports;
+  } catch (e: any) {
+    console.warn(`[Balances] Failed to fetch SOL balance for ${address}:`, e.message);
+    // Fallback to 0
+  }
 
-  const tokens = await withRetry(() =>
-    fetchUserTokens(connection, address, isX1Network(networkId))
-  );
+  let tokens: any[] = [];
+  try {
+    tokens = await withRetry(() =>
+      fetchUserTokens(connection, address, isX1Network(networkId))
+    );
+  } catch (e: any) {
+    console.warn(`[Balances] Failed to fetch tokens for ${address}:`, e.message);
+    // Fallback to empty
+  }
 
   return {
     solBalance: solBalance / LAMPORTS_PER_SOL,

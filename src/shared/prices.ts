@@ -106,7 +106,7 @@ async function fetchJupiterPrices(mints: string[]): Promise<Map<string, number>>
     if (mints.length === 0) return new Map();
 
     // Jupiter Price API v2 supports up to 100 mints (public, no auth required)
-    const chunkedMints = mints.slice(0, 100);
+    const chunkedMints = mints.filter(m => !!m).slice(0, 100);
     const ids = chunkedMints.join(',');
     const url = `${JUPITER_PRICE_API_V2_URL}?ids=${ids}`;
 
@@ -131,8 +131,13 @@ async function fetchJupiterPrices(mints: string[]): Promise<Map<string, number>>
         }
 
         return priceMap;
-    } catch (error) {
-        console.error('Failed to fetch Jupiter prices:', error);
+    } catch (error: any) {
+        // Jupiter v2 now often returns 401 without an API key.
+        // We suppress this specific error to avoid console noise.
+        // DexScreener will serve as fallback/primary.
+        if (error.message && !error.message.includes('401')) {
+            console.warn('Failed to fetch Jupiter prices:', error.message);
+        }
         return new Map();
     }
 }

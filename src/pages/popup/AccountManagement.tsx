@@ -10,6 +10,7 @@ interface ModalProps {
 }
 
 import { RestoreWalletModal } from './RestoreWalletModal';
+import { ShowMnemonicModal } from './ShowMnemonicModal';
 
 export function AddWalletModal({ onClose, onSuccess, onConnectLedger, onConnectTrezor }: ModalProps & { onConnectLedger?: () => void, onConnectTrezor?: () => void }) {
     const [mode, setMode] = useState<'select' | 'create' | 'import-seed' | 'import-pk'>('select');
@@ -701,6 +702,7 @@ export function AccountDetailsModal({ account, onClose, onSuccess, onAccountsCha
     const [isEditing, setIsEditing] = useState(false);
     const [editLabel, setEditLabel] = useState(account.label || '');
     const [isSaving, setIsSaving] = useState(false);
+    const [showMnemonicModal, setShowMnemonicModal] = useState(false);
 
     const handleSaveLabel = async () => {
         if (!editLabel.trim()) return;
@@ -828,6 +830,19 @@ export function AccountDetailsModal({ account, onClose, onSuccess, onAccountsCha
                     </div>
                 </div>
 
+                {/* Show Recovery Phrase Option for Derived Accounts */}
+                {account.type === 'derived' && (
+                    <button
+                        onClick={() => setShowMnemonicModal(true)}
+                        className="btn-secondary"
+                        style={{ width: '100%', marginBottom: '16px', justifyContent: 'center' }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Icons.Lock size={16} /> Show Recovery Phrase
+                        </div>
+                    </button>
+                )}
+
                 {!privateKey ? (
                     <>
                         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
@@ -945,6 +960,10 @@ export function AccountDetailsModal({ account, onClose, onSuccess, onAccountsCha
                             onClose();
                         }}
                     />
+                )}
+
+                {showMnemonicModal && (
+                    <ShowMnemonicModal onClose={() => setShowMnemonicModal(false)} />
                 )}
             </div>
         </div>
