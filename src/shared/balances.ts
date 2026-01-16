@@ -63,6 +63,7 @@ export async function fetchAccountBalance(
   networkId: NetworkClusterId,
   customNetworks: NetworkConfig[] = []
 ): Promise<AccountBalance> {
+  const perfStart = performance.now();
   const config = getNetworkConfig(networkId, customNetworks);
   const connection = new Connection(config.rpcUrl, 'confirmed');
 
@@ -72,8 +73,10 @@ export async function fetchAccountBalance(
       connection.getBalance(new PublicKey(address))
     );
     solBalance = lamports;
+    console.log(`[Perf] ${networkId} SOL balance done @ ${((performance.now() - perfStart) / 1000).toFixed(2)}s`);
   } catch (e: any) {
     console.warn(`[Balances] Failed to fetch SOL balance for ${address}:`, e.message);
+    console.log(`[Perf] ${networkId} SOL balance FAILED @ ${((performance.now() - perfStart) / 1000).toFixed(2)}s`);
     // Fallback to 0
   }
 
@@ -82,8 +85,10 @@ export async function fetchAccountBalance(
     tokens = await withRetry(() =>
       fetchUserTokens(connection, address, isX1Network(networkId))
     );
+    console.log(`[Perf] ${networkId} tokens (${tokens.length}) done @ ${((performance.now() - perfStart) / 1000).toFixed(2)}s`);
   } catch (e: any) {
     console.warn(`[Balances] Failed to fetch tokens for ${address}:`, e.message);
+    console.log(`[Perf] ${networkId} tokens FAILED @ ${((performance.now() - perfStart) / 1000).toFixed(2)}s`);
     // Fallback to empty
   }
 

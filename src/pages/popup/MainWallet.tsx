@@ -1,6 +1,6 @@
 
-import { useEffect, useMemo, useState } from 'react';
-import { getAllNetworks, type NetworkConfig, type NetworkClusterId } from '../../shared/networks';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { getAllNetworks, type NetworkConfig, type NetworkClusterId, type NetworkKind } from '../../shared/networks';
 import { defaultSettings } from '../../shared/settings';
 import type { WalletSettings, AccountInfo, AccountBalance, TransactionActivity, Notification, TokenBalance } from '../../shared/types';
 import { sendMessage } from '../../shared/messaging';
@@ -22,6 +22,8 @@ import { Skeleton, Icons } from '../../shared/ui';
 import { createChart, ColorType, AreaSeries } from 'lightweight-charts';
 import type { PortfolioDataPoint } from '../../shared/portfolio';
 import { DriftService, ExtensionWallet, type DriftPosition } from '../../shared/drift';
+import { fetchEvmTokenPrices } from '../../shared/prices';
+import { NATIVE_TOKEN_COINGECKO_IDS } from '../../shared/evm-balances';
 
 
 interface RuntimeResponse {
@@ -47,7 +49,7 @@ interface BalanceResponse {
 // Extended TokenBalance to include network info for unified display
 export interface UnifiedTokenBalance extends TokenBalance {
   networkId: NetworkClusterId;
-  networkKind: 'solana' | 'x1';
+  networkKind: NetworkKind;
 }
 
 export interface UnifiedAsset {
@@ -60,7 +62,8 @@ export interface UnifiedAsset {
   value: number;
   logoURI?: string;
   networkId: NetworkClusterId;
-  networkKind: 'solana' | 'x1';
+  networkKind: NetworkKind;
+  chainBadgeUrl?: string; // Chain icon for unified EVM view
   token?: UnifiedTokenBalance;
   defi?: PerpsPosition | DriftPosition;
   defiProtocol?: 'Jupiter' | 'Drift';
@@ -94,8 +97,12 @@ function NetworkModal({
   if (!isOpen) return null;
 
   const allNetworks = getAllNetworks(customNetworks);
-  // Built-in network IDs that cannot be deleted
-  const builtInIds = new Set(['solana-mainnet', 'solana-testnet', 'solana-devnet', 'solana-localnet', 'x1-mainnet', 'x1-testnet', 'x1-localnet']);
+  // Built-in network IDs that cannot be deleted (includes EVM networks)
+  const builtInIds = new Set([
+    'solana-mainnet', 'solana-testnet', 'solana-devnet', 'solana-localnet',
+    'x1-mainnet', 'x1-testnet', 'x1-localnet',
+    'ethereum-mainnet', 'ethereum-sepolia', 'arbitrum-mainnet', 'optimism-mainnet', 'base-mainnet', 'polygon-mainnet'
+  ]);
 
   return (
     <div style={{
@@ -205,6 +212,44 @@ function NetworkModal({
                       (net.environment as string) === 'testnet' ? 'Testnet' :
                         (net.environment as string) === 'devnet' ? 'Devnet' :
                           (net.environment as string) === 'localnet' ? 'Localnet' : net.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* EVM Networks */}
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                <img
+                  src="https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png"
+                  alt="Ethereum"
+                  style={{ width: '36px', height: '36px', borderRadius: '50%' }}
+                />
+                <span style={{ fontWeight: 600, fontSize: '1rem' }}>Ethereum & L2s</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginLeft: '48px' }}>
+                {allNetworks.filter(n => n.kind === 'evm').map(net => (
+                  <button
+                    key={net.id}
+                    onClick={() => onSelectNetwork(net.id)}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: '8px',
+                      border: currentNetworkId === net.id ? '2px solid var(--accent-color)' : '1px solid var(--card-border)',
+                      background: currentNetworkId === net.id ? 'var(--accent-color)' : 'var(--card-bg)',
+                      color: currentNetworkId === net.id ? 'black' : 'var(--text-primary)',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem',
+                      fontWeight: currentNetworkId === net.id ? 600 : 400,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    {net.iconUrl && (
+                      <img src={net.iconUrl} alt="" style={{ width: '16px', height: '16px', borderRadius: '50%' }} />
+                    )}
+                    {net.label}
                   </button>
                 ))}
               </div>
@@ -365,6 +410,13 @@ export function MainWallet() {
   const [balances, setBalances] = useState<Map<NetworkClusterId, AccountBalance>>(new Map());
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
 
+  // EVM address for the selected account
+  const [evmAddress, setEvmAddress] = useState<string | null>(null);
+  // Store EVM balances for ALL chains (unified view)
+  const [evmBalances, setEvmBalances] = useState<Map<string, { nativeBalance: string; nativeSymbol: string; tokens: TokenBalance[] }>>(new Map());
+  // Store EVM token prices (coingeckoId -> USD price)
+  const [evmPrices, setEvmPrices] = useState<Map<string, number>>(new Map());
+
 
 
 
@@ -379,10 +431,17 @@ export function MainWallet() {
   const [perpsValue, setPerpsValue] = useState<number>(0);
   const [initialDefiTab, setInitialDefiTab] = useState<'limit' | 'dca' | 'perps'>('perps');
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioDataPoint[]>([]);
+  const [isPortfolioHistoryLoaded, setIsPortfolioHistoryLoaded] = useState(false); // Track if initial cache load is complete
   const [showChart, setShowChart] = useState(true);
   const [chartInterval, setChartInterval] = useState<'48h' | '1w' | '1m'>('48h');
   const [stakedAmount, setStakedAmount] = useState(0);
   const [hideUnverifiedTokens, setHideUnverifiedTokens] = useState(true); // Hide spam/unverified by default
+
+  // Track portfolio history calculation to prevent repeated API calls
+  const portfolioHistoryCalculationRef = useRef<{
+    inProgress: boolean;
+    lastCalculatedFor: string | null;
+  }>({ inProgress: false, lastCalculatedFor: null });
 
   // Auto-dismiss toast after 3 seconds
   useEffect(() => {
@@ -410,7 +469,48 @@ export function MainWallet() {
     [settings.selectedNetwork, settings.customNetworks],
   );
 
-  const currency = selectedNetwork?.kind === 'x1' ? 'X1' : 'SOL';
+  const currency = selectedNetwork?.kind === 'x1' ? 'X1' : selectedNetwork?.kind === 'evm' ? selectedNetwork.nativeCurrency?.symbol || 'ETH' : 'SOL';
+
+  // Display address based on network type
+  const displayAddress = useMemo(() => {
+    if (selectedNetwork?.kind === 'evm' && evmAddress) {
+      return evmAddress;
+    }
+    return selectedAccount?.address || '';
+  }, [selectedNetwork?.kind, evmAddress, selectedAccount?.address]);
+
+  // Load cached portfolio history EARLY to avoid showing empty chart
+  useEffect(() => {
+    const loadCachedHistory = async () => {
+      if (!selectedAccount?.address) {
+        setIsPortfolioHistoryLoaded(true);
+        return;
+      }
+
+      try {
+        const { getPortfolioHistory } = await import('../../shared/portfolio');
+        // Determine the right network/key for cache lookup
+        const networkKey = selectedNetwork?.kind === 'evm' && evmAddress
+          ? 'evm-unified'
+          : (selectedNetwork?.id || 'solana-mainnet');
+        const addressKey = selectedNetwork?.kind === 'evm' && evmAddress
+          ? evmAddress
+          : selectedAccount.address;
+
+        const cached = await getPortfolioHistory(addressKey, networkKey);
+        if (cached && cached.length > 0) {
+          console.log('[Portfolio] Loaded cached history:', cached.length, 'points');
+          setPortfolioHistory(cached);
+        }
+      } catch (err) {
+        console.warn('[Portfolio] Failed to load cached history:', err);
+      } finally {
+        setIsPortfolioHistoryLoaded(true);
+      }
+    };
+
+    loadCachedHistory();
+  }, [selectedAccount?.address, selectedNetwork?.kind, selectedNetwork?.id, evmAddress]);
 
   useEffect(() => {
     let mounted = true;
@@ -463,6 +563,24 @@ export function MainWallet() {
       clearInterval(notificationInterval);
     };
   }, [currentNotification]);
+
+  // Fetch EVM address when account changes
+  useEffect(() => {
+    if (selectedAccount) {
+      sendMessage<{ success: boolean; evmAddress?: string | null; error?: string }>({
+        type: 'manaswap:getEvmAddress',
+        payload: { solanaAddress: selectedAccount.address }
+      }).then(res => {
+        if (res.success) {
+          setEvmAddress(res.evmAddress || null);
+        } else {
+          setEvmAddress(null);
+        }
+      }).catch(() => setEvmAddress(null));
+    } else {
+      setEvmAddress(null);
+    }
+  }, [selectedAccount?.address]);
 
   // Load balance for ALL networks when account changes
   useEffect(() => {
@@ -529,6 +647,12 @@ export function MainWallet() {
   const loadAllBalances = async () => {
     if (!selectedAccount) return;
 
+    const perfStart = performance.now();
+    const logPerf = (step: string) => {
+      const elapsed = ((performance.now() - perfStart) / 1000).toFixed(2);
+      console.log(`[Perf] ${step} @ ${elapsed}s`);
+    };
+
     setIsLoadingBalance(true);
     const allNetworks = getAllNetworks(settings.customNetworks);
     const newBalances = new Map<NetworkClusterId, AccountBalance>();
@@ -536,9 +660,29 @@ export function MainWallet() {
 
     try {
       console.log('[Popup] Requesting balances for all networks', selectedAccount.address);
+      logPerf('Started loadAllBalances');
 
-      // Fetch balances in parallel
-      const promises = allNetworks.map(async (network) => {
+      // First, get the EVM address for this account
+      let currentEvmAddress: string | null = null;
+      try {
+        const evmRes = await sendMessage<{ success: boolean; evmAddress?: string | null }>({
+          type: 'manaswap:getEvmAddress',
+          payload: { solanaAddress: selectedAccount.address }
+        });
+        if (evmRes.success && evmRes.evmAddress) {
+          currentEvmAddress = evmRes.evmAddress;
+          setEvmAddress(evmRes.evmAddress);
+        }
+        logPerf('Got EVM address');
+      } catch {
+        console.warn('Failed to get EVM address');
+      }
+
+      // Fetch balances in parallel (Solana/X1 networks only for now)
+      const solanaNetworks = allNetworks.filter(n => n.kind === 'solana' || n.kind === 'x1');
+      logPerf(`Fetching ${solanaNetworks.length} Solana/X1 networks`);
+      const promises = solanaNetworks.map(async (network) => {
+        const networkStart = performance.now();
         try {
           const res = await sendMessage<BalanceResponse>({
             type: 'manaswap:getBalance',
@@ -552,17 +696,75 @@ export function MainWallet() {
             newBalances.set(network.id, res.balance);
             res.balance.tokens.forEach(t => allMints.add(t.mint));
           }
+          console.log(`[Perf] Network ${network.id} done in ${((performance.now() - networkStart) / 1000).toFixed(2)}s`);
         } catch (err) {
           console.warn(`Failed to fetch balance for network ${network.id}:`, err);
+          console.log(`[Perf] Network ${network.id} FAILED in ${((performance.now() - networkStart) / 1000).toFixed(2)}s`);
         }
       });
 
       await Promise.all(promises);
+      logPerf('All Solana/X1 balances done');
+
+      // Fetch EVM balances from ALL chains if we have an EVM address and EVM network is selected
+      if (currentEvmAddress && selectedNetwork?.kind === 'evm') {
+        logPerf('Starting EVM balance fetch');
+        const evmNetworks = allNetworks.filter(n => n.kind === 'evm' && !n.environment?.includes('testnet'));
+        const newEvmBalances = new Map<string, { nativeBalance: string; nativeSymbol: string; tokens: TokenBalance[] }>();
+
+        // Fetch all EVM chain balances in parallel
+        await Promise.all(evmNetworks.map(async (network) => {
+          const evmStart = performance.now();
+          try {
+            const evmBalanceRes = await sendMessage<{ success: boolean; balance?: { nativeBalance: string; nativeSymbol: string; tokens: TokenBalance[] } }>({
+              type: 'manaswap:getEvmBalance',
+              payload: { address: currentEvmAddress, networkId: network.id }
+            });
+            if (evmBalanceRes.success && evmBalanceRes.balance) {
+              newEvmBalances.set(network.id, evmBalanceRes.balance);
+            }
+            console.log(`[Perf] EVM ${network.id} done in ${((performance.now() - evmStart) / 1000).toFixed(2)}s`);
+          } catch (err) {
+            console.warn(`Failed to fetch EVM balance for ${network.id}:`, err);
+          }
+        }));
+
+        logPerf('All EVM balances done');
+        setEvmBalances(newEvmBalances);
+
+        // Fetch EVM token prices via CoinGecko
+        const coingeckoIds = new Set<string>();
+        newEvmBalances.forEach((balance, networkId) => {
+          // Add native token ID
+          const nativeId = NATIVE_TOKEN_COINGECKO_IDS[networkId];
+          if (nativeId) coingeckoIds.add(nativeId);
+          // Add token IDs
+          balance.tokens.forEach((t: TokenBalance & { coingeckoId?: string }) => {
+            if (t.coingeckoId) coingeckoIds.add(t.coingeckoId);
+          });
+        });
+
+        if (coingeckoIds.size > 0) {
+          logPerf(`Fetching EVM prices for ${coingeckoIds.size} tokens`);
+          try {
+            const evmPriceMap = await fetchEvmTokenPrices(Array.from(coingeckoIds));
+            console.log('[MainWallet] Fetched EVM prices:', Object.fromEntries(evmPriceMap));
+            setEvmPrices(evmPriceMap);
+            logPerf('EVM prices done');
+          } catch (err) {
+            console.warn('Failed to fetch EVM prices:', err);
+          }
+        }
+      } else {
+        setEvmBalances(new Map());
+        setEvmPrices(new Map());
+      }
       setBalances(newBalances);
 
       // Fetch Perps Positions
       try {
         if (selectedNetwork?.id === 'solana-mainnet') {
+          logPerf('Starting perps fetch');
           const rpcUrl = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
           const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
 
@@ -570,6 +772,7 @@ export function MainWallet() {
           const perps = await fetchJupiterPerpsPositions(connection, selectedAccount.address);
           setPerpsPositions(perps);
           perps.forEach(p => allMints.add(p.marketMint));
+          logPerf('Jupiter perps done');
 
           // Drift
           try {
@@ -581,6 +784,7 @@ export function MainWallet() {
               const mint = getDriftUnderlyingMint(p.symbol);
               if (mint) allMints.add(mint);
             });
+            logPerf('Drift positions done');
           } catch (driftErr) {
             console.warn('Failed to fetch Drift positions', driftErr);
             setDriftPositions([]);
@@ -597,6 +801,7 @@ export function MainWallet() {
 
       // Fetch prices for all collected mints
       if (allMints.size > 0) {
+        logPerf(`Fetching Solana prices for ${allMints.size} mints`);
         sendMessage<{ success: boolean; prices: Record<string, number> }>({
           type: 'manaswap:getTokenPrices',
           payload: { mints: Array.from(allMints) }
@@ -605,6 +810,7 @@ export function MainWallet() {
             const priceMap = new Map(Object.entries(priceRes.prices));
             console.log('[MainWallet] Fetched prices:', priceRes.prices);
             setPrices(priceMap);
+            console.log(`[Perf] Solana prices done @ ${((performance.now() - perfStart) / 1000).toFixed(2)}s`);
           }
         });
       }
@@ -683,8 +889,8 @@ export function MainWallet() {
   }, [view, selectedAccount, selectedNetwork, currency]);
 
   const copyAddress = () => {
-    if (selectedAccount) {
-      navigator.clipboard.writeText(selectedAccount.address);
+    if (displayAddress) {
+      navigator.clipboard.writeText(displayAddress);
       setToast({ message: 'Address copied to clipboard', type: 'success' });
     }
   };
@@ -711,10 +917,31 @@ export function MainWallet() {
   const totalUsd = useMemo(() => {
     if (!selectedNetwork) return 0;
 
+    let total = 0;
+
+    // EVM network handling - aggregate all chains
+    if (selectedNetwork.kind === 'evm' && evmBalances.size > 0) {
+      evmBalances.forEach((evmBalance, networkId) => {
+        // Native ETH/MATIC/etc value
+        const nativeAmount = parseFloat(evmBalance.nativeBalance) || 0;
+        const nativeCoingeckoId = NATIVE_TOKEN_COINGECKO_IDS[networkId];
+        const nativePrice = nativeCoingeckoId ? (evmPrices.get(nativeCoingeckoId) || 0) : 0;
+        total += nativeAmount * nativePrice;
+
+        // ERC-20 tokens
+        evmBalance.tokens.forEach((t: TokenBalance & { coingeckoId?: string }) => {
+          const amount = Number(t.amount) / Math.pow(10, t.decimals);
+          const tokenPrice = t.coingeckoId ? (evmPrices.get(t.coingeckoId) || 0) : 0;
+          total += amount * tokenPrice;
+        });
+      });
+
+      return total;
+    }
+
+    // Solana/X1 network handling
     const balance = balances.get(selectedNetwork.id);
     if (!balance) return 0;
-
-    let total = 0;
 
     // Native token: X1 uses $1 hardcoded, Solana uses fetched price
     const nativePrice = selectedNetwork.kind === 'x1'
@@ -738,25 +965,39 @@ export function MainWallet() {
     }
 
     return total;
-  }, [balances, prices, perpsValue, selectedNetwork, stakedAmount]);
+  }, [balances, prices, perpsValue, selectedNetwork, stakedAmount, evmBalances, evmPrices]);
 
   // Load Portfolio History
   useEffect(() => {
     if (selectedAccount) {
-      sendMessage<{ success: boolean; history: PortfolioDataPoint[] }>({
-        type: 'manaswap:getPortfolioHistory',
-        payload: { address: selectedAccount.address, networkId: selectedNetwork?.id || 'solana-mainnet' }
-      }).then(res => {
-        if (res.success && res.history) {
-          setPortfolioHistory(res.history);
-        }
-      });
+      // For EVM networks, use EVM address and unified network ID
+      if (selectedNetwork?.kind === 'evm' && evmAddress) {
+        sendMessage<{ success: boolean; history: PortfolioDataPoint[] }>({
+          type: 'manaswap:getPortfolioHistory',
+          payload: { address: evmAddress, networkId: 'evm-unified' }
+        }).then(res => {
+          if (res.success && res.history) {
+            setPortfolioHistory(res.history);
+          }
+        });
+      } else {
+        // Solana/X1 networks
+        sendMessage<{ success: boolean; history: PortfolioDataPoint[] }>({
+          type: 'manaswap:getPortfolioHistory',
+          payload: { address: selectedAccount.address, networkId: selectedNetwork?.id || 'solana-mainnet' }
+        }).then(res => {
+          if (res.success && res.history) {
+            setPortfolioHistory(res.history);
+          }
+        });
+      }
     }
-  }, [selectedAccount]);
+  }, [selectedAccount, selectedNetwork?.kind, evmAddress]);
 
   // Render Portfolio Chart
   useEffect(() => {
     if (view !== 'home' || !showChart) return;
+    if (!isPortfolioHistoryLoaded) return; // Wait for cached history to load first
 
     const chartContainer = document.getElementById('portfolio-chart');
     if (!chartContainer) return;
@@ -937,7 +1178,7 @@ export function MainWallet() {
     return () => {
       chart.remove();
     };
-  }, [view, portfolioHistory, totalUsd, showChart, chartInterval]);
+  }, [view, portfolioHistory, totalUsd, showChart, chartInterval, isPortfolioHistoryLoaded]);
 
 
 
@@ -948,6 +1189,79 @@ export function MainWallet() {
     // Only show assets from the selected network
     if (!selectedNetwork) return assets;
 
+    // Handle EVM networks - show assets from ALL chains with chain badges
+    if (selectedNetwork.kind === 'evm') {
+      if (evmBalances.size === 0) return assets;
+
+      // Get all EVM network configs for chain info
+      const allNets = getAllNetworks(settings.customNetworks);
+      const evmNetworkConfigs = allNets.filter((n: NetworkConfig) => n.kind === 'evm');
+
+      // Iterate over all EVM chain balances
+      evmBalances.forEach((evmBalance, networkId) => {
+        const networkConfig = evmNetworkConfigs.find((n: NetworkConfig) => n.id === networkId);
+        if (!networkConfig) return;
+
+        // Add native token (ETH, MATIC, etc.)
+        const nativeAmount = parseFloat(evmBalance.nativeBalance) || 0;
+        if (nativeAmount > 0) {
+          // Get native token price from CoinGecko
+          const nativeCoingeckoId = NATIVE_TOKEN_COINGECKO_IDS[networkId];
+          const nativePrice = nativeCoingeckoId ? (evmPrices.get(nativeCoingeckoId) || 0) : 0;
+          const nativeValue = nativeAmount * nativePrice;
+
+          assets.push({
+            type: 'token',
+            id: `native-${networkId}`,
+            mint: `native-${networkId}`,
+            name: networkConfig.nativeCurrency?.name || 'Ether',
+            symbol: evmBalance.nativeSymbol || 'ETH',
+            amount: nativeAmount.toString(),
+            value: nativeValue,
+            logoURI: networkConfig.iconUrl || 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png',
+            networkId: networkId,
+            networkKind: 'evm',
+            chainBadgeUrl: networkConfig.iconUrl, // Chain badge for unified view
+            token: {
+              mint: `native-${networkId}`,
+              amount: nativeAmount.toString(),
+              decimals: networkConfig.nativeCurrency?.decimals || 18,
+              symbol: evmBalance.nativeSymbol || 'ETH',
+              name: networkConfig.nativeCurrency?.name || 'Ether',
+              networkId: networkId,
+              networkKind: 'evm',
+            } as UnifiedTokenBalance
+          });
+        }
+
+        // Add ERC-20 tokens
+        evmBalance.tokens.forEach((t: TokenBalance & { coingeckoId?: string }) => {
+          const amount = Number(t.amount) / Math.pow(10, t.decimals);
+          // Get token price from CoinGecko
+          const tokenPrice = t.coingeckoId ? (evmPrices.get(t.coingeckoId) || 0) : 0;
+          const tokenValue = amount * tokenPrice;
+
+          assets.push({
+            type: 'token',
+            id: `token-${t.mint}-${networkId}`,
+            mint: t.mint,
+            name: t.name || 'Unknown Token',
+            symbol: t.symbol || 'Unknown',
+            amount: amount.toString(),
+            value: tokenValue,
+            logoURI: t.logoURI,
+            networkId: networkId,
+            networkKind: 'evm',
+            chainBadgeUrl: networkConfig.iconUrl, // Chain badge for unified view
+            token: { ...t, networkId: networkId, networkKind: 'evm' as NetworkKind }
+          });
+        });
+      });
+
+      return assets.sort((a, b) => b.value - a.value);
+    }
+
+    // Solana/X1 network handling
     const balance = balances.get(selectedNetwork.id);
     if (!balance) return assets;
 
@@ -1058,10 +1372,80 @@ export function MainWallet() {
 
     // Sort by USD value descending
     return assets.sort((a, b) => b.value - a.value);
-  }, [balances, prices, selectedNetwork, perpsPositions, driftPositions, hideUnverifiedTokens]);
+  }, [balances, prices, selectedNetwork, perpsPositions, driftPositions, hideUnverifiedTokens, evmBalances, evmPrices, settings.customNetworks]);
 
   useEffect(() => {
     if (view === 'home' && unifiedAssets.length > 0 && selectedAccount && selectedNetwork) {
+      // Handle EVM networks - calculate portfolio history with CoinGecko historical prices
+      if (selectedNetwork.kind === 'evm' && evmAddress && evmBalances.size > 0) {
+        // Create a unique key for this calculation context
+        const calculationKey = `evm-${evmAddress}-${evmBalances.size}`;
+
+        // Guard: Skip if calculation already in progress or already done for this context
+        if (portfolioHistoryCalculationRef.current.inProgress) {
+          console.log('[MainWalletDebug] Skipping EVM portfolio calculation - already in progress');
+          return;
+        }
+        if (portfolioHistoryCalculationRef.current.lastCalculatedFor === calculationKey && portfolioHistory.length > 10) {
+          console.log('[MainWalletDebug] Skipping EVM portfolio calculation - already calculated for this context');
+          return;
+        }
+
+        console.log('[MainWalletDebug] EVM network detected, calculating historical portfolio...');
+        portfolioHistoryCalculationRef.current.inProgress = true;
+
+        // Collect current balances with their coingecko IDs
+        const currentBalances = new Map<string, number>(); // coingeckoId -> amount
+        const coingeckoIds = new Set<string>();
+
+        evmBalances.forEach((balance, networkId) => {
+          // Native token
+          const nativeAmount = parseFloat(balance.nativeBalance) || 0;
+          const nativeId = NATIVE_TOKEN_COINGECKO_IDS[networkId];
+          if (nativeId && nativeAmount > 0) {
+            currentBalances.set(nativeId, (currentBalances.get(nativeId) || 0) + nativeAmount);
+            coingeckoIds.add(nativeId);
+          }
+
+          // ERC-20 tokens
+          balance.tokens.forEach((t: any) => {
+            if (t.coingeckoId) {
+              const amount = Number(t.amount) / Math.pow(10, t.decimals);
+              currentBalances.set(t.coingeckoId, (currentBalances.get(t.coingeckoId) || 0) + amount);
+              coingeckoIds.add(t.coingeckoId);
+            }
+          });
+        });
+
+        if (coingeckoIds.size > 0) {
+          // Fetch historical prices from CoinGecko
+          import('../../shared/prices').then(({ fetchEvmHistoricalPrices }) => {
+            fetchEvmHistoricalPrices(Array.from(coingeckoIds), 7).then(historicalPrices => {
+              import('../../shared/portfolio').then(({ calculateEvmHistoricalPortfolio, savePortfolioHistory }) => {
+                const history = calculateEvmHistoricalPortfolio(currentBalances, historicalPrices);
+                console.log('[MainWalletDebug] EVM portfolio history calculated:', history.length, 'points');
+
+                if (history.length > 0) {
+                  setPortfolioHistory(history);
+                  // Save to cache
+                  savePortfolioHistory(evmAddress, 'evm-unified', history);
+                }
+
+                // Mark calculation complete
+                portfolioHistoryCalculationRef.current.inProgress = false;
+                portfolioHistoryCalculationRef.current.lastCalculatedFor = calculationKey;
+              });
+            }).catch(err => {
+              console.error('[MainWalletDebug] EVM fetchEvmHistoricalPrices error:', err);
+              portfolioHistoryCalculationRef.current.inProgress = false;
+            });
+          });
+        } else {
+          portfolioHistoryCalculationRef.current.inProgress = false;
+        }
+        return;
+      }
+
       if (selectedNetwork.kind === 'x1') {
         const network = selectedNetwork;
         const account = selectedAccount;
@@ -1205,7 +1589,7 @@ export function MainWallet() {
         console.log('[MainWalletDebug] No assets for history, skipping calculation');
       }
     }
-  }, [unifiedAssets, view, selectedAccount, selectedNetwork, prices]);
+  }, [unifiedAssets, view, selectedAccount, selectedNetwork, prices, evmAddress, evmBalances]);
 
 
   // Load cached history on mount - but only if wallet has assets
@@ -1231,7 +1615,7 @@ export function MainWallet() {
   }, [selectedAccount?.address, unifiedAssets.length, stakedAmount, selectedNetwork?.kind]);
 
   // Helper to get chain icon
-  const getChainIcon = (kind: 'solana' | 'x1') => {
+  const getChainIcon = (kind: NetworkKind, chainBadgeUrl?: string) => {
     if (kind === 'x1') {
       return (
         <div style={{
@@ -1241,6 +1625,31 @@ export function MainWallet() {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: '8px', color: 'white', fontWeight: 'bold'
         }}>X</div>
+      );
+    }
+    if (kind === 'evm') {
+      // Use chain badge URL if available (for unified EVM view)
+      if (chainBadgeUrl) {
+        return (
+          <img
+            src={chainBadgeUrl}
+            alt=""
+            style={{
+              width: '14px', height: '14px', borderRadius: '50%',
+              border: '1.5px solid var(--card-bg)',
+              background: 'var(--card-bg)'
+            }}
+          />
+        );
+      }
+      return (
+        <div style={{
+          width: '12px', height: '12px', borderRadius: '50%',
+          background: 'linear-gradient(135deg, #627EEA, #3C3C3D)',
+          border: '1px solid var(--card-bg)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '7px', color: 'white', fontWeight: 'bold'
+        }}>E</div>
       );
     }
     return (
@@ -1385,7 +1794,7 @@ export function MainWallet() {
               </div>
               <div className="account-info-compact">
                 <span className="account-label">{selectedAccount.label || `Account ${selectedAccount.index + 1}`}</span>
-                <span className="account-address">{selectedAccount.address.slice(0, 6)}...{selectedAccount.address.slice(-4)}</span>
+                <span className="account-address">{displayAddress.slice(0, 6)}...{displayAddress.slice(-4)}</span>
               </div>
               <Icons.ChevronDown size={14} />
             </div>
@@ -1717,7 +2126,7 @@ export function MainWallet() {
                                 right: '-2px',
                                 zIndex: 10
                               }}>
-                                {getChainIcon(asset.networkKind)}
+                                {getChainIcon(asset.networkKind, asset.chainBadgeUrl)}
                               </div>
                             )}
                           </div>
@@ -1968,13 +2377,21 @@ export function MainWallet() {
         onClick={() => setShowNetworkModal(true)}
         title="Click to switch network"
       >
-        <img
-          src={selectedNetwork?.kind === 'x1' ? '/icons/x1-logo.png' : '/icons/solana-logo.png'}
-          alt=""
-          style={{ width: '16px', height: '16px', objectFit: 'contain', marginRight: '6px' }}
-        />
+        {selectedNetwork?.kind === 'evm' && selectedNetwork?.iconUrl ? (
+          <img
+            src={selectedNetwork.iconUrl}
+            alt=""
+            style={{ width: '16px', height: '16px', objectFit: 'contain', marginRight: '6px', borderRadius: '50%' }}
+          />
+        ) : (
+          <img
+            src={selectedNetwork?.kind === 'x1' ? '/icons/x1-logo.png' : '/icons/solana-logo.png'}
+            alt=""
+            style={{ width: '16px', height: '16px', objectFit: 'contain', marginRight: '6px' }}
+          />
+        )}
         <span className="status-dot" style={{
-          background: selectedNetwork?.kind === 'x1' ? '#f59e0b' : '#22c55e'
+          background: selectedNetwork?.kind === 'x1' ? '#f59e0b' : selectedNetwork?.kind === 'evm' ? '#627EEA' : '#22c55e'
         }} />
         <span>{selectedNetwork?.label || 'Select Network'}</span>
         <Icons.ChevronDown size={12} style={{ marginLeft: 4 }} />

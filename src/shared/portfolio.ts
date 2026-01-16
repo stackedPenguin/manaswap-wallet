@@ -330,4 +330,71 @@ export async function calculateHistoricalPortfolio(
     return portfolioHistory.reverse(); // Return oldest first
 }
 
+/**
+ * Calculate EVM historical portfolio using current balances and historical prices
+ *
+ * Since we don't have transaction history for EVM, we use a simpler approach:
+ * - Assume current balances were held throughout the period
+ * - Apply historical prices to calculate historical values
+ *
+ * This is less accurate than the Solana approach but works without API keys.
+ *
+ * @param currentBalances Map of coingeckoId -> current balance amount
+ * @param historicalPrices Map of coingeckoId -> array of {timestamp, price}
+ * @returns Array of PortfolioDataPoint sorted by timestamp (oldest first)
+ */
+export function calculateEvmHistoricalPortfolio(
+    currentBalances: Map<string, number>,  // coingeckoId -> amount
+    historicalPrices: Map<string, Array<{ timestamp: number; price: number }>>
+): PortfolioDataPoint[] {
+    if (currentBalances.size === 0 || historicalPrices.size === 0) {
+        return [];
+    }
+
+    // Collect all unique timestamps from all price histories
+    const allTimestamps = new Set<number>();
+    historicalPrices.forEach(prices => {
+        prices.forEach(p => allTimestamps.add(p.timestamp));
+    });
+
+    if (allTimestamps.size === 0) return [];
+
+    // Sort timestamps
+    const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
+
+    // Calculate portfolio value at each timestamp
+    const portfolioHistory: PortfolioDataPoint[] = [];
+
+    for (const timestamp of sortedTimestamps) {
+        let totalValue = 0;
+
+        currentBalances.forEach((amount, coingeckoId) => {
+            const priceHistory = historicalPrices.get(coingeckoId);
+            if (!priceHistory || priceHistory.length === 0) return;
+
+            // Find the closest price at or before this timestamp
+            let price = 0;
+            for (let i = priceHistory.length - 1; i >= 0; i--) {
+                if (priceHistory[i].timestamp <= timestamp) {
+                    price = priceHistory[i].price;
+                    break;
+                }
+            }
+
+            // Fallback to first available price if timestamp is before history
+            if (price === 0 && priceHistory.length > 0) {
+                price = priceHistory[0].price;
+            }
+
+            totalValue += amount * price;
+        });
+
+        portfolioHistory.push({
+            timestamp: timestamp * 1000, // Convert to milliseconds for consistency
+            value: totalValue
+        });
+    }
+
+    return portfolioHistory;
+}
 

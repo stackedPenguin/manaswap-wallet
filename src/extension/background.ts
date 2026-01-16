@@ -6,6 +6,7 @@ if (typeof window === 'undefined') {
 }
 import type { DAppPermission, ManaswapMessage, Notification, PendingRequest, SiteDetectionPayload, WalletSettings } from '../shared/types';
 import { fetchAccountBalance } from '../shared/balances';
+import { fetchEvmAccountBalance } from '../shared/evm-balances';
 import { fetchTokenPrices } from '../shared/prices';
 import { fetchTransactionHistory } from '../shared/history';
 import { sendSol, sendSplToken } from '../shared/transactions';
@@ -26,13 +27,17 @@ import {
   getAccountKeypair,
   getAccountInfo,
   setAccountLabel,
-  deleteAccount
+  deleteAccount,
+  getEvmAddressForAccount
 } from './vault';
 import { Connection, VersionedTransaction, Transaction, Keypair } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 import { getLedgerAccounts } from './ledger';
 import { getTrezorAccounts } from './trezor';
 import { savePortfolioDataPoint } from '../shared/portfolio';
+import { calculateEvmPortfolioValue, EVM_UNIFIED_NETWORK_ID } from '../shared/evm-history';
+import { fetchEvmTokenPrices } from '../shared/prices';
+import { NATIVE_TOKEN_COINGECKO_IDS } from '../shared/evm-balances';
 import { fetchJupiterPerpsPositions, calculatePositionPnl } from '../shared/perps';
 
 // In-memory cache for network health
@@ -236,6 +241,55 @@ async function trackPortfolioValue() {
       } catch (e) {
         // Continue to next network
       }
+    }
+
+    // Track EVM portfolio (unified across all chains)
+    try {
+      const accountInfo = await getAccountInfo(address);
+      const evmAddress = accountInfo ? getEvmAddressForAccount(accountInfo) : null;
+      if (evmAddress) {
+        console.log('[Background] Tracking EVM portfolio for', evmAddress);
+
+        // Get all EVM mainnet networks
+        const evmNetworks = allNetworks.filter(n => n.kind === 'evm' && !n.id.includes('testnet') && !n.id.includes('sepolia'));
+
+        // Fetch EVM balances from all chains in parallel
+        const evmBalances = new Map<string, { nativeBalance: string; nativeSymbol: string; tokens: any[] }>();
+        await Promise.all(evmNetworks.map(async (network) => {
+          try {
+            const balance = await fetchEvmAccountBalance(evmAddress, network.id);
+            evmBalances.set(network.id, balance);
+          } catch {
+            // Skip failed networks
+          }
+        }));
+
+        // Collect all CoinGecko IDs for price fetching
+        const coingeckoIds = new Set<string>();
+        evmBalances.forEach((balance, networkId) => {
+          const nativeId = NATIVE_TOKEN_COINGECKO_IDS[networkId];
+          if (nativeId) coingeckoIds.add(nativeId);
+          balance.tokens.forEach((t: any) => {
+            if (t.coingeckoId) coingeckoIds.add(t.coingeckoId);
+          });
+        });
+
+        // Fetch prices
+        const evmPrices = await fetchEvmTokenPrices(Array.from(coingeckoIds));
+
+        // Calculate total EVM portfolio value
+        const { totalValue } = calculateEvmPortfolioValue(evmBalances, evmPrices);
+
+        // Save unified EVM portfolio data point
+        await savePortfolioDataPoint(evmAddress, EVM_UNIFIED_NETWORK_ID, {
+          timestamp: Date.now(),
+          value: totalValue
+        });
+
+        console.log('[Background] EVM portfolio value:', totalValue);
+      }
+    } catch (e) {
+      console.warn('[Background] Error tracking EVM portfolio:', e);
     }
   } catch (e) {
     console.error('[Background] Error in trackPortfolioValue', e);
@@ -567,6 +621,37 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           sendResponse({ success: true, balance });
         } catch (e: any) {
           console.error('[Background] Failed to fetch balance', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      // EVM Balance Handler
+      case 'manaswap:getEvmBalance': {
+        try {
+          const { address, networkId } = message.payload;
+          console.log('[Background] Fetching EVM balance for', address, 'on', networkId);
+          const evmBalance = await fetchEvmAccountBalance(address, networkId);
+          console.log('[Background] EVM balance:', evmBalance.nativeBalance, evmBalance.nativeSymbol);
+          sendResponse({ success: true, balance: evmBalance });
+        } catch (e: any) {
+          console.error('[Background] Failed to fetch EVM balance', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      // EVM Address Handler
+      case 'manaswap:getEvmAddress': {
+        try {
+          const { solanaAddress } = message.payload;
+          const accountInfo = getAccountInfo(solanaAddress);
+          if (!accountInfo) {
+            sendResponse({ success: false, error: 'Account not found' });
+            break;
+          }
+          const evmAddress = getEvmAddressForAccount(accountInfo);
+          sendResponse({ success: true, evmAddress });
+        } catch (e: any) {
+          console.error('[Background] Failed to get EVM address', e);
           sendResponse({ success: false, error: e.message });
         }
         break;
