@@ -18,12 +18,21 @@ const safeSendMessage = async <T>(message: unknown): Promise<T | null> => {
 
 const injectProvider = () => {
   try {
-    const url = chrome.runtime.getURL('assets/inject.js');
-    const script = document.createElement('script');
-    script.type = 'module';
-    script.src = url;
-    script.addEventListener('load', () => script.remove());
-    (document.head || document.documentElement).appendChild(script);
+    // Inject Solana provider
+    const solanaUrl = chrome.runtime.getURL('assets/inject.js');
+    const solanaScript = document.createElement('script');
+    solanaScript.type = 'module';
+    solanaScript.src = solanaUrl;
+    solanaScript.addEventListener('load', () => solanaScript.remove());
+    (document.head || document.documentElement).appendChild(solanaScript);
+
+    // Inject EVM provider
+    const evmUrl = chrome.runtime.getURL('assets/inject-evm.js');
+    const evmScript = document.createElement('script');
+    evmScript.type = 'module';
+    evmScript.src = evmUrl;
+    evmScript.addEventListener('load', () => evmScript.remove());
+    (document.head || document.documentElement).appendChild(evmScript);
   } catch (error) {
     console.error('[Manaswap] Failed to inject provider', error);
   }
@@ -57,7 +66,40 @@ const notifyDetection = (network: NetworkClusterId, confidence: number) => {
   safeSendMessage({ type: 'manaswap:detectionEvent', payload });
 };
 
-// Listen for provider requests and forward to background
+// Listen for EVM provider requests and forward to background
+window.addEventListener('message', async (event) => {
+  if (event.source !== window) return;
+
+  // Handle EVM provider messages
+  if (event.data?.source === 'manaswap-evm') {
+    const { type, payload, requestId, origin, hostname } = event.data;
+
+    try {
+      const response = await safeSendMessage({
+        type,
+        payload: { ...payload, origin, hostname },
+      });
+
+      // Send response back to EVM provider
+      window.postMessage({
+        source: 'manaswap-evm-content',
+        type: 'response',
+        requestId,
+        ...(response as object),
+      }, '*');
+    } catch (error) {
+      window.postMessage({
+        source: 'manaswap-evm-content',
+        type: 'response',
+        requestId,
+        success: false,
+        error: { code: -32603, message: error instanceof Error ? error.message : 'Unknown error' },
+      }, '*');
+    }
+  }
+});
+
+// Listen for Solana provider requests and forward to background
 window.addEventListener('message', async (event) => {
   // Only process messages from the same origin
   if (event.source !== window) return;

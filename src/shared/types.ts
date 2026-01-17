@@ -7,6 +7,7 @@ export interface WalletSettings {
   siteOverrides: Record<string, NetworkClusterId>;
   customNetworks: import('./networks').NetworkConfig[];
   autoLockMinutes: number; // Auto-lock wallet after N minutes of inactivity (0 = never)
+  evmChainId?: string; // Current EVM chain ID in hex (e.g., '0x1' for Ethereum mainnet)
 }
 
 export interface SiteDetectionPayload {
@@ -66,6 +67,7 @@ export interface TokenBalance {
   logoURI?: string;
   usdValue?: number;
   isVerified?: boolean; // True if token is on Jupiter strict list
+  coingeckoId?: string; // CoinGecko ID for price fetching (EVM tokens)
 }
 
 export interface AccountBalance {
@@ -168,6 +170,10 @@ export type ManaswapMessage =
   // Balance Messages
   | { type: 'manaswap:getBalance'; payload: { address: string; networkId: NetworkClusterId } }
   | { type: 'manaswap:refreshBalance'; payload: { address: string; networkId: NetworkClusterId } }
+  // EVM Balance Messages
+  | { type: 'manaswap:getEvmBalance'; payload: { address: string; networkId: NetworkClusterId } }
+  // EVM Account Messages
+  | { type: 'manaswap:getEvmAddress'; payload: { solanaAddress: string } }
   // Transaction Messages
   | { type: 'manaswap:sendTransaction'; payload: { recipient: string; amount: number; networkId: NetworkClusterId; tokenMint?: string; tokenDecimals?: number } }
   | {
@@ -215,4 +221,15 @@ export type ManaswapMessage =
   | { type: 'manaswap:dappGetNetwork'; payload: { origin: string } }
   | { type: 'manaswap:dappSwitchChain'; payload: { origin: string; networkId: string } }
   // Trezor Messages
-  | { type: 'manaswap:getTrezorAccounts' };
+  | { type: 'manaswap:getTrezorAccounts' }
+  // EVM Provider Messages
+  | { type: 'manaswap:evmGetState'; payload: { origin?: string } }
+  | { type: 'manaswap:evmRequestAccounts'; payload: { origin: string; hostname: string } }
+  | { type: 'manaswap:evmSwitchChain'; payload: { chainId: string } }
+  | { type: 'manaswap:evmPersonalSign'; payload: { message: string; address: string; origin: string; hostname: string } }
+  | { type: 'manaswap:evmSignTypedData'; payload: { address: string; data: string; version: string; origin: string; hostname: string } }
+  | { type: 'manaswap:evmSendTransaction'; payload: { transaction: any; origin: string; hostname: string } }
+  | { type: 'manaswap:evmRpcCall'; payload: { method: string; params: unknown } }
+  | { type: 'manaswap:evmApprovalResponse'; payload: { popupId: string; approved: boolean } }
+  | { type: 'manaswap:evmGetPermissions' }
+  | { type: 'manaswap:evmRevokePermission'; payload: { origin: string; address: string } };

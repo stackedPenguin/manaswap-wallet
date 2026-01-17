@@ -1,4 +1,5 @@
 import { Connection } from '@solana/web3.js';
+import { EVM_NETWORKS, type EvmNetworkConfig, isEvmNetworkId } from './evm-networks';
 
 // RPC URL - direct import.meta.env for build-time inlining
 const SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
@@ -11,15 +12,28 @@ export type NetworkClusterId =
   | 'x1-mainnet'
   | 'x1-testnet'
   | 'x1-localnet'
+  // EVM networks
+  | 'ethereum-mainnet'
+  | 'ethereum-sepolia'
+  | 'arbitrum-mainnet'
+  | 'optimism-mainnet'
+  | 'base-mainnet'
+  | 'polygon-mainnet'
   | string; // Allow custom network IDs
+
+export type NetworkKind = 'solana' | 'x1' | 'evm';
 
 export interface NetworkConfig {
   id: NetworkClusterId;
   label: string;
   rpcUrl: string;
   explorerUrl: string;
-  kind: 'solana' | 'x1';
+  kind: NetworkKind;
   environment: 'mainnet' | 'testnet' | 'devnet' | 'localnet' | 'custom';
+  // EVM-specific fields (optional)
+  chainId?: number;
+  nativeCurrency?: { name: string; symbol: string; decimals: number };
+  iconUrl?: string;
 }
 
 export type NetworkHealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown';
@@ -93,7 +107,39 @@ export const NETWORKS: NetworkConfig[] = [
 
 export const DEFAULT_NETWORK_ID: NetworkClusterId = 'solana-mainnet';
 
+/**
+ * Convert EVM network config to unified NetworkConfig
+ */
+function evmToNetworkConfig(evm: EvmNetworkConfig): NetworkConfig {
+  return {
+    id: evm.id,
+    label: evm.name,
+    rpcUrl: evm.rpcUrl,
+    explorerUrl: evm.explorerUrl,
+    kind: 'evm',
+    environment: evm.isTestnet ? 'testnet' : 'mainnet',
+    chainId: evm.chainId,
+    nativeCurrency: evm.nativeCurrency,
+    iconUrl: evm.iconUrl,
+  };
+}
+
+/**
+ * Get all EVM networks as NetworkConfig
+ */
+export function getEvmNetworks(): NetworkConfig[] {
+  return EVM_NETWORKS.map(evmToNetworkConfig);
+}
+
 export function getNetworkConfig(id: NetworkClusterId, customNetworks: NetworkConfig[] = []): NetworkConfig {
+  // Check EVM networks first
+  if (isEvmNetworkId(id)) {
+    const evmNetwork = EVM_NETWORKS.find(n => n.id === id);
+    if (evmNetwork) {
+      return evmToNetworkConfig(evmNetwork);
+    }
+  }
+
   const allNetworks = [...NETWORKS, ...customNetworks];
   const match = allNetworks.find((network) => network.id === id);
   if (!match) {
@@ -105,7 +151,21 @@ export function getNetworkConfig(id: NetworkClusterId, customNetworks: NetworkCo
 }
 
 export function getAllNetworks(customNetworks: NetworkConfig[] = []): NetworkConfig[] {
-  return [...NETWORKS, ...customNetworks];
+  return [...NETWORKS, ...getEvmNetworks(), ...customNetworks];
+}
+
+/**
+ * Check if a network is an EVM network
+ */
+export function isEvmNetwork(networkId: NetworkClusterId): boolean {
+  return isEvmNetworkId(networkId);
+}
+
+/**
+ * Check if a network is Solana-compatible (Solana or X1)
+ */
+export function isSolanaCompatibleNetwork(networkId: NetworkClusterId): boolean {
+  return networkId.startsWith('solana-') || networkId.startsWith('x1-');
 }
 
 /**

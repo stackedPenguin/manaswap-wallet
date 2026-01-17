@@ -31,6 +31,7 @@ export default defineConfig({
       input: {
         main: 'src/pages/popup/index.html',
         inject: 'src/provider/inject.ts',
+        'inject-evm': 'src/provider/inject-evm.ts',
       },
       output: {
         entryFileNames: 'assets/[name].js',

@@ -5,6 +5,8 @@ import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { Keypair } from '@solana/web3.js';
 import { derivePath } from 'ed25519-hd-key';
 import bs58 from 'bs58';
+import { deriveEvmAddress, getEvmWalletFromMnemonic, getEvmWalletFromPrivateKey, isValidEvmPrivateKey } from './evm-keypair';
+import type { Wallet } from 'ethers';
 
 const VAULT_STORAGE_KEY = 'manaswap:vault';
 const SESSION_KEYRING_KEY = 'manaswap:session:keyring';
@@ -869,4 +871,150 @@ export async function deleteAccount(address: string): Promise<void> {
   if (!found) throw new Error('Account not found');
 
   await saveVault();
+}
+
+// ============================================
+// EVM Support Functions
+// ============================================
+
+/**
+ * Get the EVM address for a Solana account
+ * Uses the same mnemonic but derives using EVM BIP44 path (m/44'/60'/0'/0/index)
+ */
+export function getEvmAddressForAccount(account: AccountInfo): string | null {
+  if (!keyring) return null;
+
+  // Find the source for this account
+  const source = keyring.sources.find(s => s.id === account.sourceId);
+  if (!source) return null;
+
+  // Only mnemonic sources can derive EVM addresses
+  if (source.type !== 'mnemonic') {
+    // For imported private keys, we can't derive EVM address from Solana key
+    return null;
+  }
+
+  // Derive EVM address using the same index
+  return deriveEvmAddress(source.value, account.index);
+}
+
+/**
+ * Get all accounts with their corresponding EVM addresses
+ * Returns accounts with an additional evmAddress field
+ */
+export function getAllAccountsWithEvmAddresses(): (AccountInfo & { evmAddress: string | null })[] {
+  const accounts = getAllAccounts();
+  return accounts.map(account => ({
+    ...account,
+    evmAddress: getEvmAddressForAccount(account)
+  }));
+}
+
+/**
+ * Get EVM wallet (signer) for an account by its Solana address
+ * Used for signing EVM transactions
+ */
+export function getEvmWalletForAccount(solanaAddress: string): Wallet | null {
+  if (!keyring) return null;
+
+  // Find the account and its source
+  for (const source of keyring.sources) {
+    const account = source.accounts.find(a => a.address === solanaAddress);
+    if (account) {
+      if (source.type === 'mnemonic') {
+        return getEvmWalletFromMnemonic(source.value, account.index);
+      }
+      // For imported keys, we can't get EVM wallet
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get EVM wallet by EVM address
+ * Searches through all accounts to find the matching one
+ */
+export function getEvmWalletByEvmAddress(evmAddress: string): Wallet | null {
+  if (!keyring) return null;
+
+  const normalizedAddress = evmAddress.toLowerCase();
+
+  for (const source of keyring.sources) {
+    if (source.type !== 'mnemonic') continue;
+
+    for (const account of source.accounts) {
+      const derivedEvmAddress = deriveEvmAddress(source.value, account.index);
+      if (derivedEvmAddress.toLowerCase() === normalizedAddress) {
+        return getEvmWalletFromMnemonic(source.value, account.index);
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find account by EVM address
+ */
+export function findAccountByEvmAddress(evmAddress: string): AccountInfo | null {
+  if (!keyring) return null;
+
+  const normalizedAddress = evmAddress.toLowerCase();
+
+  for (const source of keyring.sources) {
+    if (source.type !== 'mnemonic') continue;
+
+    for (const account of source.accounts) {
+      const derivedEvmAddress = deriveEvmAddress(source.value, account.index);
+      if (derivedEvmAddress.toLowerCase() === normalizedAddress) {
+        return account;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Import an EVM private key as a new account source
+ */
+export async function importEvmAccount(privateKey: string, label?: string): Promise<AccountInfo> {
+  if (!keyring) throw new Error('Vault is locked');
+
+  // Validate key
+  if (!isValidEvmPrivateKey(privateKey)) {
+    throw new Error('Invalid EVM private key format');
+  }
+
+  const wallet = getEvmWalletFromPrivateKey(privateKey);
+  const evmAddress = wallet.address;
+
+  // Check if already exists
+  const existing = findAccountByEvmAddress(evmAddress);
+  if (existing) {
+    throw new Error('This EVM account is already imported');
+  }
+
+  // Create a new source for the imported EVM key
+  const sourceId = crypto.randomUUID();
+  const newSource: KeySource = {
+    id: sourceId,
+    type: 'privateKey', // Using existing type
+    value: privateKey,
+    label: label || `EVM ${evmAddress.slice(0, 6)}...${evmAddress.slice(-4)}`,
+    accounts: [{
+      address: evmAddress, // Store EVM address directly
+      index: -1, // Imported accounts don't have index
+      label: label || `EVM ${evmAddress.slice(0, 6)}...${evmAddress.slice(-4)}`,
+      type: 'imported',
+      sourceId: sourceId
+    }]
+  };
+
+  keyring.sources.push(newSource);
+  await saveVault();
+
+  return newSource.accounts[0];
 }
