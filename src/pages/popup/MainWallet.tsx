@@ -2149,10 +2149,27 @@ export function MainWallet() {
                               ${asset.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                             {asset.type === 'token' && (() => {
-                              // For X1 native token, use $1 hardcoded price
-                              const displayPrice = asset.networkKind === 'x1' && asset.mint === 'So11111111111111111111111111111111111111112'
-                                ? 1.0
-                                : (prices.get(asset.mint || '') || 0);
+                              // Calculate display price based on network type
+                              let displayPrice = 0;
+                              if (asset.networkKind === 'x1' && asset.mint === 'So11111111111111111111111111111111111111112') {
+                                // X1 native token: hardcoded $1
+                                displayPrice = 1.0;
+                              } else if (asset.networkKind === 'evm') {
+                                // EVM tokens: use coingeckoId to lookup in evmPrices
+                                if (asset.mint?.startsWith('native-')) {
+                                  // Native token (ETH, MATIC, etc.)
+                                  const networkId = asset.networkId || '';
+                                  const coingeckoId = NATIVE_TOKEN_COINGECKO_IDS[networkId];
+                                  displayPrice = coingeckoId ? (evmPrices.get(coingeckoId) || 0) : 0;
+                                } else {
+                                  // ERC-20 token
+                                  const coingeckoId = (asset.token as any)?.coingeckoId;
+                                  displayPrice = coingeckoId ? (evmPrices.get(coingeckoId) || 0) : 0;
+                                }
+                              } else {
+                                // Solana tokens: use mint to lookup in prices
+                                displayPrice = prices.get(asset.mint || '') || 0;
+                              }
                               return (
                                 <div className="asset-price-per-token" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
                                   @${displayPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: displayPrice < 0.01 ? 6 : displayPrice < 1 ? 4 : 2 })}
