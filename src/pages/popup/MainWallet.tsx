@@ -14,6 +14,7 @@ import { StakingPage } from './StakingPage';
 import { getStakeAccountsForWallet, getX1RpcUrl } from '../../shared/staking';
 import { TokenDetails } from './TokenDetails';
 import { DefiPositions } from './DefiPositions';
+import { fetchAllUniswapPositions, type ProcessedPosition } from '../../shared/uniswap-positions';
 import { ReceivePage } from './ReceiveModal';
 import { SwapPage } from './SwapPage';
 import { SendTransactionModal } from './SendTransactionModal';
@@ -61,12 +62,12 @@ export interface UnifiedAsset {
   amount: string;
   value: number;
   logoURI?: string;
-  networkId: NetworkClusterId;
+  networkId: NetworkClusterId | string; // Allow string for EVM network IDs like 'ethereum-mainnet'
   networkKind: NetworkKind;
   chainBadgeUrl?: string; // Chain icon for unified EVM view
   token?: UnifiedTokenBalance;
-  defi?: PerpsPosition | DriftPosition;
-  defiProtocol?: 'Jupiter' | 'Drift';
+  defi?: PerpsPosition | DriftPosition | ProcessedPosition;
+  defiProtocol?: 'Jupiter' | 'Drift' | 'Uniswap';
 }
 
 
@@ -428,6 +429,7 @@ export function MainWallet() {
   const [selectedTokenForDetails, setSelectedTokenForDetails] = useState<UnifiedTokenBalance | null>(null);
   const [perpsPositions, setPerpsPositions] = useState<PerpsPosition[]>([]);
   const [driftPositions, setDriftPositions] = useState<DriftPosition[]>([]);
+  const [uniswapPositions, setUniswapPositions] = useState<ProcessedPosition[]>([]);
   const [perpsValue, setPerpsValue] = useState<number>(0);
   const [initialDefiTab, setInitialDefiTab] = useState<'limit' | 'dca' | 'perps'>('perps');
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioDataPoint[]>([]);
@@ -744,6 +746,11 @@ export function MainWallet() {
           });
         });
 
+        // Add common DeFi tokens for Uniswap position value calculation
+        // These are fetched proactively since Uniswap positions are loaded after prices
+        const DEFI_TOKEN_IDS = ['wrapped-bitcoin', 'weth', 'usd-coin', 'tether', 'dai'];
+        DEFI_TOKEN_IDS.forEach(id => coingeckoIds.add(id));
+
         if (coingeckoIds.size > 0) {
           logPerf(`Fetching EVM prices for ${coingeckoIds.size} tokens`);
           try {
@@ -755,9 +762,21 @@ export function MainWallet() {
             console.warn('Failed to fetch EVM prices:', err);
           }
         }
+
+        // Fetch Uniswap V3/V4 positions
+        logPerf('Starting Uniswap positions fetch');
+        try {
+          const uniPositions = await fetchAllUniswapPositions(currentEvmAddress);
+          setUniswapPositions(uniPositions);
+          logPerf(`Uniswap positions done: ${uniPositions.length} found`);
+        } catch (err) {
+          console.warn('Failed to fetch Uniswap positions:', err);
+          setUniswapPositions([]);
+        }
       } else {
         setEvmBalances(new Map());
         setEvmPrices(new Map());
+        setUniswapPositions([]);
       }
       setBalances(newBalances);
 
@@ -1258,6 +1277,54 @@ export function MainWallet() {
         });
       });
 
+      // Token address to CoinGecko ID mapping for common tokens
+      const TOKEN_COINGECKO_IDS: Record<string, string> = {
+        // Ethereum
+        '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': 'wrapped-bitcoin', // WBTC
+        '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'usd-coin', // USDC
+        '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'weth', // WETH
+        '0xdac17f958d2ee523a2206206994597c13d831ec7': 'tether', // USDT
+        '0x6b175474e89094c44da98b954eedeac495271d0f': 'dai', // DAI
+        // Arbitrum
+        '0x82af49447d8a07e3bd95bd0d56f35241523fbab1': 'weth', // WETH
+        '0xaf88d065e77c8cc2239327c5edb3a432268e5831': 'usd-coin', // USDC
+        '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8': 'usd-coin', // USDC.e
+        '0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f': 'wrapped-bitcoin', // WBTC
+        // Base
+        '0x4200000000000000000000000000000000000006': 'weth', // WETH
+        '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'usd-coin', // USDC
+      };
+
+      // Add Uniswap V3/V4 Positions
+      uniswapPositions.forEach((pos) => {
+        // Get the network config for chain badge
+        const networkConfig = evmNetworkConfigs.find((n: NetworkConfig) => n.id === pos.network);
+
+        // Calculate USD value from token amounts and prices
+        const token0CgId = TOKEN_COINGECKO_IDS[pos.token0Address.toLowerCase()];
+        const token1CgId = TOKEN_COINGECKO_IDS[pos.token1Address.toLowerCase()];
+        const price0 = token0CgId ? (evmPrices.get(token0CgId) || 0) : 0;
+        const price1 = token1CgId ? (evmPrices.get(token1CgId) || 0) : 0;
+        const amount0 = parseFloat(pos.amount0) || 0;
+        const amount1 = parseFloat(pos.amount1) || 0;
+        const value = (amount0 * price0) + (amount1 * price1);
+
+        assets.push({
+          type: 'defi',
+          id: pos.id,
+          name: `Uniswap ${pos.version.toUpperCase()}`,
+          symbol: `${pos.token0Symbol}/${pos.token1Symbol}`,
+          amount: pos.isFullRange ? 'Full Range' : pos.feePercent,
+          value: value,
+          logoURI: '/icons/uniswap-defi.png',
+          networkId: pos.network,
+          networkKind: 'evm',
+          chainBadgeUrl: networkConfig?.iconUrl,
+          defi: pos,
+          defiProtocol: 'Uniswap'
+        });
+      });
+
       return assets.sort((a, b) => b.value - a.value);
     }
 
@@ -1372,7 +1439,7 @@ export function MainWallet() {
 
     // Sort by USD value descending
     return assets.sort((a, b) => b.value - a.value);
-  }, [balances, prices, selectedNetwork, perpsPositions, driftPositions, hideUnverifiedTokens, evmBalances, evmPrices, settings.customNetworks]);
+  }, [balances, prices, selectedNetwork, perpsPositions, driftPositions, uniswapPositions, hideUnverifiedTokens, evmBalances, evmPrices, settings.customNetworks]);
 
   useEffect(() => {
     if (view === 'home' && unifiedAssets.length > 0 && selectedAccount && selectedNetwork) {
@@ -2118,8 +2185,8 @@ export function MainWallet() {
                               </div>
                             )}
 
-                            {/* Chain Icon Overlay for Tokens */}
-                            {asset.type === 'token' && (
+                            {/* Chain Icon Overlay for Tokens and Uniswap DeFi */}
+                            {(asset.type === 'token' || (asset.type === 'defi' && asset.defiProtocol === 'Uniswap')) && (
                               <div style={{
                                 position: 'absolute',
                                 bottom: '-2px',
@@ -2132,12 +2199,63 @@ export function MainWallet() {
                           </div>
 
                           <div className="asset-info">
-                            <div className="asset-name">{asset.name}</div>
+                            <div className="asset-name">
+                              {asset.type === 'defi' && asset.defiProtocol === 'Uniswap' ? (
+                                <>
+                                  {asset.symbol}
+                                  <span style={{
+                                    marginLeft: '6px',
+                                    padding: '2px 5px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.6rem',
+                                    fontWeight: 600,
+                                    background: (asset.defi as ProcessedPosition)?.version === 'v4'
+                                      ? 'rgba(118, 69, 217, 0.2)'
+                                      : 'rgba(255, 0, 122, 0.2)',
+                                    color: (asset.defi as ProcessedPosition)?.version === 'v4'
+                                      ? '#a78bfa'
+                                      : '#ff007a'
+                                  }}>
+                                    {(asset.defi as ProcessedPosition)?.version?.toUpperCase()}
+                                  </span>
+                                  {(asset.defi as ProcessedPosition)?.isClosed && (
+                                    <span style={{
+                                      marginLeft: '4px',
+                                      padding: '2px 5px',
+                                      borderRadius: '4px',
+                                      fontSize: '0.6rem',
+                                      fontWeight: 600,
+                                      background: 'rgba(239, 68, 68, 0.2)',
+                                      color: '#ef4444'
+                                    }}>
+                                      CLOSED
+                                    </span>
+                                  )}
+                                </>
+                              ) : asset.name}
+                            </div>
                             <div className="asset-symbol">
                               {asset.type === 'token' ? (
                                 <>
                                   {Number(asset.amount).toLocaleString(undefined, { maximumFractionDigits: 4 })} {asset.symbol}
                                 </>
+                              ) : asset.defiProtocol === 'Uniswap' ? (
+                                <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                                  {(() => {
+                                    const pos = asset.defi as ProcessedPosition;
+                                    const amt0 = parseFloat(pos?.amount0 || '0');
+                                    const amt1 = parseFloat(pos?.amount1 || '0');
+                                    if (amt0 > 0 || amt1 > 0) {
+                                      // Show actual amounts
+                                      const parts = [];
+                                      if (amt0 > 0) parts.push(`${amt0.toFixed(4)} ${pos.token0Symbol}`);
+                                      if (amt1 > 0) parts.push(`${amt1.toFixed(2)} ${pos.token1Symbol}`);
+                                      return parts.join(' + ');
+                                    }
+                                    // For V4 or positions where we can't calculate amounts
+                                    return `${asset.amount} · ${pos?.feePercent}`;
+                                  })()}
+                                </span>
                               ) : (
                                 <span style={{ color: 'var(--accent-color)' }}>{asset.amount}</span>
                               )}
@@ -2185,7 +2303,8 @@ export function MainWallet() {
               )}
             </div>
           )}
-        </>
+
+          </>
       ) : view === 'history' ? (
         <div className="history-section" style={{ padding: '0 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '16px', marginBottom: '16px' }}>

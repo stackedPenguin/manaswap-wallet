@@ -78,21 +78,8 @@ interface EvmPermission {
   timestamp: number;
 }
 
-interface PendingEvmRequest {
-  type: 'connect' | 'personal_sign' | 'signTypedData' | 'transaction';
-  origin: string;
-  hostname: string;
-  evmAddress: string;
-  message?: string;
-  typedData?: any;
-  transaction?: any;
-  network?: any;
-  resolve: (result: { approved: boolean }) => void;
-}
-
 const EVM_PERMISSIONS_STORAGE_KEY = 'manaswap:evmPermissions';
 let evmPermissionsCache: EvmPermission[] = [];
-const pendingEvmRequests = new Map<string, PendingEvmRequest>();
 
 // Load EVM permissions from storage
 async function loadEvmPermissions(): Promise<EvmPermission[]> {
@@ -445,12 +432,39 @@ async function openPopup() {
       isPopupOpening = false;
       return;
     } catch (e: any) {
-      // If the popup is already open, openPopup throws an error.
-      if (e.message && (e.message.includes('already open') || e.message.includes('Extension popup'))) {
+      // If the popup is already open or any popup-related error, don't create fallback
+      if (e.message && (
+        e.message.includes('already open') ||
+        e.message.includes('Extension popup') ||
+        e.message.includes('popup') ||
+        e.message.includes('Another popup')
+      )) {
         isPopupOpening = false;
         return;
       }
-      console.debug('chrome.action.openPopup failed, falling back to window', e);
+      console.debug('chrome.action.openPopup failed, checking if popup opened anyway', e);
+
+      // Wait a moment and check if popup actually opened despite the error
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const views = chrome.extension.getViews({ type: 'popup' });
+      if (views.length > 0) {
+        console.debug('Popup opened despite error, skipping fallback');
+        isPopupOpening = false;
+        return;
+      }
+    }
+
+    // Double-check no popup/window exists before creating fallback
+    const windows = await chrome.windows.getAll({ populate: true });
+    const popupUrl = chrome.runtime.getURL('src/pages/popup/index.html');
+    const existingPopup = windows.find(w =>
+      w.tabs?.some(t => t.url?.includes(popupUrl))
+    );
+    if (existingPopup) {
+      console.debug('Popup window already exists, skipping fallback');
+      await chrome.windows.update(existingPopup.id!, { focused: true });
+      isPopupOpening = false;
+      return;
     }
 
     // Fallback to creating a new window
@@ -1144,21 +1158,17 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           }
 
           const settings = await readSettings();
-          console.log('[approveRequest] Settings selectedAccountAddress:', settings.selectedAccountAddress);
 
           // Check vault state
           const vaultState = await getVaultState();
-          console.log('[approveRequest] Vault state:', vaultState);
 
           let publicKeyToUse: string;
 
           if (vaultState.isLocked) {
             // Vault is locked - use settings.selectedAccountAddress directly
             if (settings.selectedAccountAddress) {
-              console.log('[approveRequest] Vault locked, using settings.selectedAccountAddress');
               publicKeyToUse = settings.selectedAccountAddress;
             } else {
-              console.log('[approveRequest] Vault locked and no selectedAccountAddress - error');
               sendResponse({ success: false, error: 'Wallet is locked. Please unlock to connect.' });
               break;
             }
@@ -1167,20 +1177,15 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             let keypair;
             try {
               if (settings.selectedAccountAddress) {
-                console.log('[approveRequest] Using getAccountKeypair for:', settings.selectedAccountAddress);
                 keypair = getAccountKeypair(settings.selectedAccountAddress);
               } else {
-                console.log('[approveRequest] No selectedAccountAddress, using getMainKeypair');
                 keypair = getMainKeypair();
               }
             } catch (e) {
-              console.log('[approveRequest] getAccountKeypair failed, fallback to getMainKeypair:', e);
               keypair = getMainKeypair();
             }
             publicKeyToUse = keypair.publicKey.toBase58();
           }
-
-          console.log('[approveRequest] Using publicKey:', publicKeyToUse);
 
           let result: unknown;
 
@@ -1197,18 +1202,14 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             permissionsCache.push(permission);
             await savePermissions(permissionsCache);
             result = { publicKey: permission.publicKey };
-            console.log('[approveRequest] Connect approved, publicKey:', permission.publicKey);
           } else if (request.type === 'sign-transaction') {
-            console.log('[approveRequest] Signing single transaction');
             // Actually sign the transaction
             const txBytes = new Uint8Array(request.payload as number[]);
-            console.log('[approveRequest] Transaction bytes length:', txBytes.length);
 
             // Try to deserialize as versioned transaction first
             let signedTx: Uint8Array;
             try {
               const tx = VersionedTransaction.deserialize(txBytes);
-              console.log('[approveRequest] Deserialized as VersionedTransaction');
 
               // Get keypair for currently selected account
               const settings = await readSettings();
@@ -1220,13 +1221,10 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
               } catch (e) {
                 keypair = getMainKeypair();
               }
-              console.log('[approveRequest] Signing with keypair:', keypair.publicKey.toBase58());
 
               tx.sign([keypair]);
               signedTx = tx.serialize();
-              console.log('[approveRequest] Signed transaction, new length:', signedTx.length);
             } catch (versionedError) {
-              console.log('[approveRequest] Not a VersionedTransaction, trying legacy:', versionedError);
               // Try legacy transaction
               const tx = Transaction.from(txBytes);
 
@@ -1239,17 +1237,13 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
               } catch (e) {
                 keypair = getMainKeypair();
               }
-              console.log('[approveRequest] Signing legacy tx with keypair:', keypair.publicKey.toBase58());
 
               tx.partialSign(keypair);
               signedTx = tx.serialize({ requireAllSignatures: false });
-              console.log('[approveRequest] Signed legacy transaction, new length:', signedTx.length);
             }
 
             result = { transaction: Array.from(signedTx) };
-            console.log('[approveRequest] Transaction signed successfully');
           } else if (request.type === 'sign-all-transactions') {
-            console.log('[approveRequest] Signing multiple transactions');
             const transactions = request.payload as number[][];
             const signedTransactions: number[][] = [];
 
@@ -1262,13 +1256,9 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             } catch (e) {
               keypair = getMainKeypair();
             }
-            console.log('[approveRequest] Signing with keypair:', keypair.publicKey.toBase58());
-
-
 
             for (let i = 0; i < transactions.length; i++) {
               const txBytes = new Uint8Array(transactions[i]);
-              console.log(`[approveRequest] Signing tx ${i + 1}/${transactions.length}`);
 
               try {
                 const tx = VersionedTransaction.deserialize(txBytes);
@@ -1282,9 +1272,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             }
 
             result = { transactions: signedTransactions };
-            console.log('[approveRequest] All transactions signed');
           } else if (request.type === 'sign-message') {
-            console.log('[approveRequest] Signing message');
             const messageBytes = new Uint8Array(request.payload as number[]);
 
             const settings = await readSettings();
@@ -1296,15 +1284,12 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             } catch (e) {
               keypair = getMainKeypair();
             }
-            console.log('[approveRequest] Signing message with keypair:', keypair.publicKey.toBase58());
 
             // Sign the message using tweetnacl
             const signature = nacl.sign.detached(messageBytes, keypair.secretKey);
 
             result = { signature: Array.from(signature) };
-            console.log('[approveRequest] Message signed, signature length:', signature.length);
           } else if (request.type === 'sign-and-send-transaction') {
-            console.log('[approveRequest] Sign and send transaction');
             const txBytes = new Uint8Array(request.payload as number[]);
             const txOptions = (request as any).options || {};
 
@@ -1317,17 +1302,14 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             } catch (e) {
               keypair = getMainKeypair();
             }
-            console.log('[approveRequest] Signing with keypair:', keypair.publicKey.toBase58());
 
             // Use the wallet's CURRENT selected network (user's explicit choice)
             // NOT the permission's stored networkId - that would override user's selection
             const networkToUse = settings.selectedNetwork;
-            console.log('[approveRequest] Using current wallet network:', networkToUse);
 
             // Get connection for current network
             const config = getNetworkConfig(networkToUse, settings.customNetworks);
             const connection = new Connection(config.rpcUrl, 'confirmed');
-            console.log('[approveRequest] RPC URL:', config.rpcUrl);
 
             let txSignature: string;
             try {
@@ -1343,9 +1325,7 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
                 preflightCommitment: 'confirmed',
                 maxRetries: 3,
               });
-              console.log('[approveRequest] Sent versioned transaction:', txSignature);
             } catch (versionedError) {
-              console.log('[approveRequest] Trying legacy transaction:', versionedError);
               // Try legacy transaction
               const tx = Transaction.from(txBytes);
 
@@ -1357,13 +1337,10 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
                 preflightCommitment: 'confirmed',
                 maxRetries: 3,
               });
-              console.log('[approveRequest] Sent legacy transaction:', txSignature);
             }
 
             result = { signature: txSignature };
-            console.log('[approveRequest] Transaction sent successfully');
           } else if (request.type === 'switch-chain') {
-            console.log('[approveRequest] Switching chain');
             const payload = request.payload as { targetNetworkId: string; targetNetworkName: string };
 
             // Actually switch the network
@@ -1372,27 +1349,126 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             await writeSettings(newSettings);
             await syncBadge(newSettings);
 
-            console.log('[approveRequest] Network switched to:', payload.targetNetworkId);
             result = { success: true };
+          } else if (request.type === 'evm-connect') {
+            // EVM connect approval
+            const evmRequest = request as PendingRequest & { evmAddress: string };
+
+            // Get EVM address - might be empty if wallet was locked during initial request
+            let evmAddress = evmRequest.evmAddress;
+            if (!evmAddress) {
+              const settings = await readSettings();
+              let selectedAddress = settings.selectedAccountAddress;
+
+              // Fallback to main keypair
+              if (!selectedAddress) {
+                const mainKeypair = getMainKeypair();
+                selectedAddress = mainKeypair.publicKey.toBase58();
+              }
+
+              let accountInfo = getAccountInfo(selectedAddress);
+              if (!accountInfo) {
+                accountInfo = { address: selectedAddress, index: 0, type: 'derived' };
+              }
+
+              const fetchedAddress = getEvmAddressForAccount(accountInfo);
+              if (!fetchedAddress) {
+                throw new Error('Could not get EVM address');
+              }
+              evmAddress = fetchedAddress;
+            }
+
+            // Save EVM permission
+            await saveEvmPermission({
+              origin: request.origin,
+              hostname: request.hostname,
+              address: evmAddress,
+              timestamp: Date.now(),
+            });
+
+            result = { accounts: [evmAddress] };
+          } else if (request.type === 'evm-sign') {
+            // EVM personal_sign approval
+            const evmRequest = request as PendingRequest & { evmAddress: string; payload: { message: string } };
+
+            const wallet = getEvmWalletByEvmAddress(evmRequest.evmAddress);
+            if (!wallet) {
+              throw new Error('Wallet not found for address');
+            }
+
+            const signature = await wallet.signMessage(evmRequest.payload.message);
+            result = { signature };
+          } else if (request.type === 'evm-sign-typed-data') {
+            // EVM signTypedData approval
+            const evmRequest = request as PendingRequest & { evmAddress: string; payload: { data: string } };
+
+            const wallet = getEvmWalletByEvmAddress(evmRequest.evmAddress);
+            if (!wallet) {
+              throw new Error('Wallet not found for address');
+            }
+
+            const typedData = JSON.parse(evmRequest.payload.data);
+            const { domain, types, message: typedMessage } = typedData;
+            // Remove EIP712Domain from types if present (ethers handles it)
+            const { EIP712Domain: _removed, ...signingTypes } = types;
+            const signature = await wallet.signTypedData(domain, signingTypes, typedMessage);
+            result = { signature };
+          } else if (request.type === 'evm-transaction') {
+            // EVM sendTransaction approval
+            const evmRequest = request as PendingRequest & {
+              evmAddress: string;
+              payload: { to?: string; value?: string; data?: string; gas?: string; chainId?: string };
+              network: string;
+            };
+
+            const wallet = getEvmWalletByEvmAddress(evmRequest.evmAddress);
+            if (!wallet) {
+              throw new Error('Wallet not found for address');
+            }
+
+            // Get network from chainId
+            const chainIdNum = parseInt(evmRequest.payload.chainId || '0x1', 16);
+            const network = getEvmNetworkByChainId(chainIdNum);
+            if (!network) {
+              throw new Error('Network not found');
+            }
+
+            const provider = getEvmProvider(network.id);
+            const connectedWallet = wallet.connect(provider);
+
+            // Build transaction with chainId
+            const tx: any = {
+              to: evmRequest.payload.to,
+              data: evmRequest.payload.data,
+              value: evmRequest.payload.value ? BigInt(evmRequest.payload.value) : 0n,
+              chainId: chainIdNum,
+            };
+
+            // Add gas if specified
+            if (evmRequest.payload.gas) tx.gasLimit = BigInt(evmRequest.payload.gas);
+
+            try {
+              const txResponse = await connectedWallet.sendTransaction(tx);
+              // Return hash immediately - dApps will poll for receipt themselves
+              result = { hash: txResponse.hash };
+            } catch (txError: any) {
+              console.error('[EVM] Transaction failed:', txError.message || txError);
+              throw txError;
+            }
           }
 
           pendingRequests.delete(message.payload.requestId);
-          console.log('[approveRequest] Deleted pending request, calling responder');
 
           // Call the original responder to complete the dApp connection
           const responder = pendingResponders.get(message.payload.requestId);
           if (responder) {
             pendingResponders.delete(message.payload.requestId);
-            console.log('[approveRequest] Calling responder with result');
             responder({ success: true, data: result });
-          } else {
-            console.log('[approveRequest] No responder found for requestId:', message.payload.requestId);
           }
 
           sendResponse({ success: true, data: result });
-          console.log('[approveRequest] Sent response to popup');
         } catch (e: any) {
-          console.error('[approveRequest] Error:', e);
+          console.error('[approveRequest] Error:', e.message || e);
           // Also notify original responder of error
           const responder = pendingResponders.get(message.payload.requestId);
           if (responder) {
@@ -1665,18 +1741,67 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
 
       case 'manaswap:evmRequestAccounts': {
         try {
-          const settings = await readSettings();
-          const selectedAddress = settings.selectedAccountAddress;
+          // Check if wallet is locked - if so, open popup for unlock
+          const vaultState = await getVaultState();
+          if (vaultState.isLocked || !vaultState.isInitialized) {
+            console.log('[evmRequestAccounts] Wallet is locked, opening popup for unlock');
+            const { origin, hostname } = message.payload || {};
 
-          if (!selectedAddress) {
-            sendResponse({ success: false, error: 'No account selected' });
+            // Create a pending request that will be processed after unlock
+            const requestId = `evm-connect-${Date.now()}`;
+            const request: PendingRequest = {
+              id: requestId,
+              type: 'evm-connect',
+              origin: origin || '',
+              hostname: hostname || '',
+              timestamp: Date.now(),
+              evmAddress: '', // Will be filled after unlock
+            };
+            pendingRequests.set(requestId, request);
+            pendingResponders.set(requestId, sendResponse);
+
+            // Open popup for user to unlock
+            openPopup();
             break;
           }
 
-          const accountInfo = getAccountInfo(selectedAddress);
+          const settings = await readSettings();
+          let selectedAddress = settings.selectedAccountAddress;
+
+          // Fallback to main keypair if no account selected
+          if (!selectedAddress) {
+            try {
+              const mainKeypair = getMainKeypair();
+              selectedAddress = mainKeypair.publicKey.toBase58();
+              console.log('[evmRequestAccounts] No selectedAccountAddress, using main keypair:', selectedAddress);
+            } catch (e) {
+              console.error('[evmRequestAccounts] Failed to get main keypair:', e);
+              // Open popup instead of returning error
+              openPopup();
+              const { origin, hostname } = message.payload || {};
+              const requestId = `evm-connect-${Date.now()}`;
+              pendingRequests.set(requestId, {
+                id: requestId,
+                type: 'evm-connect',
+                origin: origin || '',
+                hostname: hostname || '',
+                timestamp: Date.now(),
+                evmAddress: '',
+              });
+              pendingResponders.set(requestId, sendResponse);
+              break;
+            }
+          }
+
+          let accountInfo = getAccountInfo(selectedAddress);
+          // If account info not found, create a temporary one for the main keypair
           if (!accountInfo) {
-            sendResponse({ success: false, error: 'Account not found' });
-            break;
+            console.log('[evmRequestAccounts] Creating temp account info for:', selectedAddress);
+            accountInfo = {
+              address: selectedAddress,
+              index: 0,
+              type: 'derived',
+            };
           }
 
           const evmAddress = getEvmAddressForAccount(accountInfo);
@@ -1697,33 +1822,21 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             break;
           }
 
-          // Create popup for approval
-          const popupId = `evm-connect-${Date.now()}`;
-          pendingEvmRequests.set(popupId, {
-            type: 'connect',
-            origin,
-            hostname,
+          // Create pending request for approval (same pattern as Solana)
+          const requestId = `evm-connect-${Date.now()}`;
+          const request: PendingRequest = {
+            id: requestId,
+            type: 'evm-connect',
+            origin: origin || '',
+            hostname: hostname || '',
+            timestamp: Date.now(),
             evmAddress,
-            resolve: (result) => {
-              pendingEvmRequests.delete(popupId);
-              if (result.approved) {
-                // Save permission
-                saveEvmPermission({ origin, hostname, address: evmAddress, timestamp: Date.now() });
-                sendResponse({ success: true, accounts: [evmAddress] });
-              } else {
-                sendResponse({ success: false, error: 'User rejected connection' });
-              }
-            }
-          });
+          };
+          pendingRequests.set(requestId, request);
+          pendingResponders.set(requestId, sendResponse);
 
-          // Open popup for user approval
-          chrome.windows.create({
-            url: chrome.runtime.getURL(`src/pages/popup/index.html?evmApproval=${popupId}&type=connect&origin=${encodeURIComponent(origin || '')}&hostname=${encodeURIComponent(hostname || '')}&address=${encodeURIComponent(evmAddress)}`),
-            type: 'popup',
-            width: 400,
-            height: 600,
-            focused: true,
-          });
+          // Open popup (uses chrome.action.openPopup when possible)
+          openPopup();
         } catch (e: any) {
           console.error('[Background] evmRequestAccounts failed:', e);
           sendResponse({ success: false, error: e.message });
@@ -1770,13 +1883,6 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             break;
           }
 
-          // Get wallet for signing
-          const wallet = getEvmWalletByEvmAddress(address);
-          if (!wallet) {
-            sendResponse({ success: false, error: 'Wallet not found for address' });
-            break;
-          }
-
           // Decode message if it's hex
           let messageText = signMessage;
           if (signMessage.startsWith('0x')) {
@@ -1788,36 +1894,22 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             }
           }
 
-          // Create popup for approval
-          const popupId = `evm-sign-${Date.now()}`;
-          pendingEvmRequests.set(popupId, {
-            type: 'personal_sign',
-            origin,
-            hostname,
+          // Create pending request for approval (same pattern as Solana)
+          const requestId = `evm-sign-${Date.now()}`;
+          const request: PendingRequest = {
+            id: requestId,
+            type: 'evm-sign',
+            origin: origin || '',
+            hostname: hostname || '',
+            timestamp: Date.now(),
             evmAddress: address,
-            message: messageText,
-            resolve: async (result) => {
-              pendingEvmRequests.delete(popupId);
-              if (result.approved) {
-                try {
-                  const signature = await wallet.signMessage(messageText);
-                  sendResponse({ success: true, signature });
-                } catch (signError: any) {
-                  sendResponse({ success: false, error: signError.message });
-                }
-              } else {
-                sendResponse({ success: false, error: 'User rejected signing' });
-              }
-            }
-          });
+            payload: { message: messageText },
+          };
+          pendingRequests.set(requestId, request);
+          pendingResponders.set(requestId, sendResponse);
 
-          chrome.windows.create({
-            url: chrome.runtime.getURL(`src/pages/popup/index.html?evmApproval=${popupId}&type=sign&origin=${encodeURIComponent(origin || '')}&message=${encodeURIComponent(messageText)}`),
-            type: 'popup',
-            width: 400,
-            height: 600,
-            focused: true,
-          });
+          // Open popup
+          openPopup();
         } catch (e: any) {
           console.error('[Background] evmPersonalSign failed:', e);
           sendResponse({ success: false, error: e.message });
@@ -1838,49 +1930,22 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             break;
           }
 
-          const wallet = getEvmWalletByEvmAddress(address);
-          if (!wallet) {
-            sendResponse({ success: false, error: 'Wallet not found for address' });
-            break;
-          }
-
-          // Parse typed data
-          const typedData = typeof data === 'string' ? JSON.parse(data) : data;
-
-          // Create popup for approval
-          const popupId = `evm-typed-${Date.now()}`;
-          pendingEvmRequests.set(popupId, {
-            type: 'signTypedData',
-            origin,
-            hostname,
+          // Create pending request for approval (same pattern as Solana)
+          const requestId = `evm-typed-${Date.now()}`;
+          const request: PendingRequest = {
+            id: requestId,
+            type: 'evm-sign-typed-data',
+            origin: origin || '',
+            hostname: hostname || '',
+            timestamp: Date.now(),
             evmAddress: address,
-            typedData,
-            resolve: async (result) => {
-              pendingEvmRequests.delete(popupId);
-              if (result.approved) {
-                try {
-                  // Use ethers signTypedData
-                  const { domain, types, message: typedMessage } = typedData;
-                  // Remove EIP712Domain from types if present (ethers handles it)
-                  const { EIP712Domain, ...signingTypes } = types;
-                  const signature = await wallet.signTypedData(domain, signingTypes, typedMessage);
-                  sendResponse({ success: true, signature });
-                } catch (signError: any) {
-                  sendResponse({ success: false, error: signError.message });
-                }
-              } else {
-                sendResponse({ success: false, error: 'User rejected signing' });
-              }
-            }
-          });
+            payload: { data: typeof data === 'string' ? data : JSON.stringify(data) },
+          };
+          pendingRequests.set(requestId, request);
+          pendingResponders.set(requestId, sendResponse);
 
-          chrome.windows.create({
-            url: chrome.runtime.getURL(`src/pages/popup/index.html?evmApproval=${popupId}&type=typedData&origin=${encodeURIComponent(origin || '')}`),
-            type: 'popup',
-            width: 400,
-            height: 600,
-            focused: true,
-          });
+          // Open popup
+          openPopup();
         } catch (e: any) {
           console.error('[Background] evmSignTypedData failed:', e);
           sendResponse({ success: false, error: e.message });
@@ -1890,21 +1955,19 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
 
       case 'manaswap:evmSendTransaction': {
         try {
+          console.log('[Background] evmSendTransaction received:', JSON.stringify(message.payload));
           const { transaction, origin, hostname } = message.payload;
           const fromAddress = transaction.from;
+          console.log('[Background] evmSendTransaction fromAddress:', fromAddress, 'origin:', origin);
 
           // Verify permission
           const permissions = await getEvmPermissions();
+          console.log('[Background] evmSendTransaction permissions:', JSON.stringify(permissions));
           const hasPermission = permissions.some(p => p.origin === origin && p.address.toLowerCase() === fromAddress.toLowerCase());
+          console.log('[Background] evmSendTransaction hasPermission:', hasPermission);
 
           if (!hasPermission) {
             sendResponse({ success: false, error: 'Not connected to this dApp' });
-            break;
-          }
-
-          const wallet = getEvmWalletByEvmAddress(fromAddress);
-          if (!wallet) {
-            sendResponse({ success: false, error: 'Wallet not found for address' });
             break;
           }
 
@@ -1919,54 +1982,32 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
             break;
           }
 
-          // Create popup for approval
-          const popupId = `evm-tx-${Date.now()}`;
-          pendingEvmRequests.set(popupId, {
-            type: 'transaction',
-            origin,
-            hostname,
+          // Create pending request for approval (same pattern as Solana)
+          const requestId = `evm-tx-${Date.now()}`;
+          console.log('[Background] evmSendTransaction creating pending request:', requestId);
+          const request: PendingRequest = {
+            id: requestId,
+            type: 'evm-transaction',
+            origin: origin || '',
+            hostname: hostname || '',
+            timestamp: Date.now(),
             evmAddress: fromAddress,
-            transaction,
-            network,
-            resolve: async (result) => {
-              pendingEvmRequests.delete(popupId);
-              if (result.approved) {
-                try {
-                  const provider = getEvmProvider(network.id);
-                  const connectedWallet = wallet.connect(provider);
+            payload: {
+              to: transaction.to,
+              value: transaction.value,
+              data: transaction.data,
+              gas: transaction.gas,
+              chainId,
+            },
+            network: network.name,
+          };
+          pendingRequests.set(requestId, request);
+          pendingResponders.set(requestId, sendResponse);
+          console.log('[Background] evmSendTransaction pending request stored, opening popup');
 
-                  // Build transaction
-                  const tx: any = {
-                    to: transaction.to,
-                    data: transaction.data,
-                    value: transaction.value ? BigInt(transaction.value) : 0n,
-                  };
-
-                  // Add gas if specified
-                  if (transaction.gas) tx.gasLimit = BigInt(transaction.gas);
-                  if (transaction.gasPrice) tx.gasPrice = BigInt(transaction.gasPrice);
-                  if (transaction.maxFeePerGas) tx.maxFeePerGas = BigInt(transaction.maxFeePerGas);
-                  if (transaction.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = BigInt(transaction.maxPriorityFeePerGas);
-
-                  const txResponse = await connectedWallet.sendTransaction(tx);
-                  sendResponse({ success: true, hash: txResponse.hash });
-                } catch (txError: any) {
-                  console.error('[Background] EVM tx failed:', txError);
-                  sendResponse({ success: false, error: txError.message });
-                }
-              } else {
-                sendResponse({ success: false, error: 'User rejected transaction' });
-              }
-            }
-          });
-
-          chrome.windows.create({
-            url: chrome.runtime.getURL(`src/pages/popup/index.html?evmApproval=${popupId}&type=transaction&origin=${encodeURIComponent(origin || '')}&to=${encodeURIComponent(transaction.to || '')}&value=${encodeURIComponent(transaction.value || '0')}&network=${encodeURIComponent(network.name)}`),
-            type: 'popup',
-            width: 400,
-            height: 600,
-            focused: true,
-          });
+          // Open popup
+          openPopup();
+          console.log('[Background] evmSendTransaction popup opened');
         } catch (e: any) {
           console.error('[Background] evmSendTransaction failed:', e);
           sendResponse({ success: false, error: e.message });
@@ -1990,20 +2031,6 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           const provider = getEvmProvider(network.id);
           const result = await provider.send(method, params as any[] || []);
           sendResponse({ success: true, result });
-        } catch (e: any) {
-          sendResponse({ success: false, error: e.message });
-        }
-        break;
-      }
-
-      case 'manaswap:evmApprovalResponse': {
-        try {
-          const { popupId, approved } = message.payload;
-          const pending = pendingEvmRequests.get(popupId);
-          if (pending) {
-            pending.resolve({ approved });
-          }
-          sendResponse({ success: true });
         } catch (e: any) {
           sendResponse({ success: false, error: e.message });
         }

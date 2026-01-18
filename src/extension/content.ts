@@ -81,13 +81,15 @@ window.addEventListener('message', async (event) => {
       });
 
       // Send response back to EVM provider
-      window.postMessage({
+      const responseMessage = {
         source: 'manaswap-evm-content',
         type: 'response',
         requestId,
         ...(response as object),
-      }, '*');
+      };
+      window.postMessage(responseMessage, '*');
     } catch (error) {
+      console.error('[Manaswap Content] EVM request error:', error);
       window.postMessage({
         source: 'manaswap-evm-content',
         type: 'response',

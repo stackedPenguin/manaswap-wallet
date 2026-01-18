@@ -5,7 +5,14 @@ import { MainWallet } from './MainWallet';
 import { Onboarding } from './Onboarding';
 import { Unlock } from './Unlock';
 import { DAppApprovalModal } from './DAppApprovalModal';
+import { EvmApprovalModal } from './EvmApprovalModal';
 import './index.css';
+
+// Helper to check if a request is an EVM request
+function isEvmRequest(request: PendingRequest | null): boolean {
+  if (!request) return false;
+  return request.type.startsWith('evm-');
+}
 
 export function App() {
   const [vaultState, setVaultState] = useState<VaultState | null>(null);
@@ -58,11 +65,6 @@ export function App() {
           type: 'manaswap:getPendingRequests',
         });
         if (res.success && res.requests && res.requests.length > 0 && !pendingRequest) {
-          // Also ensure we have settings for the Blowfish simulation
-          if (!settings) {
-            // Let the main checkState handle settings fetching, or do it here if urgent
-            // But avoiding duplicate calls is better. checkState loop handles it.
-          }
           setPendingRequest(res.requests[0]);
         }
       } catch (error) {
@@ -136,10 +138,38 @@ export function App() {
     );
   }
 
+  // Convert EVM pending request to EvmApprovalData format
+  const getEvmApprovalData = () => {
+    if (!pendingRequest || !isEvmRequest(pendingRequest)) return null;
+
+    const evmReq = pendingRequest as PendingRequest & { evmAddress?: string; payload?: any; network?: string };
+
+    // Map request type to approval modal type
+    let type: 'connect' | 'sign' | 'typedData' | 'transaction' = 'connect';
+    if (pendingRequest.type === 'evm-sign') type = 'sign';
+    else if (pendingRequest.type === 'evm-sign-typed-data') type = 'typedData';
+    else if (pendingRequest.type === 'evm-transaction') type = 'transaction';
+
+    return {
+      popupId: pendingRequest.id,
+      type,
+      origin: pendingRequest.origin,
+      hostname: pendingRequest.hostname,
+      address: evmReq.evmAddress,
+      message: evmReq.payload?.message,
+      to: evmReq.payload?.to,
+      value: evmReq.payload?.value,
+      data: evmReq.payload?.data,
+      network: evmReq.network,
+    };
+  };
+
+  const evmApprovalData = getEvmApprovalData();
+
   return (
     <div className="popup-shell">
       <MainWallet />
-      {pendingRequest && (
+      {pendingRequest && !isEvmRequest(pendingRequest) && (
         <DAppApprovalModal
           request={pendingRequest}
           accountAddress={settings?.selectedAccountAddress || null}
@@ -149,6 +179,26 @@ export function App() {
             void checkState();
           }}
           onReject={() => {
+            setPendingRequest(null);
+          }}
+        />
+      )}
+      {evmApprovalData && (
+        <EvmApprovalModal
+          data={evmApprovalData}
+          onApprove={async () => {
+            await sendMessage({
+              type: 'manaswap:approveRequest',
+              payload: { requestId: evmApprovalData.popupId }
+            });
+            setPendingRequest(null);
+            void checkState();
+          }}
+          onReject={async () => {
+            await sendMessage({
+              type: 'manaswap:rejectRequest',
+              payload: { requestId: evmApprovalData.popupId }
+            });
             setPendingRequest(null);
           }}
         />

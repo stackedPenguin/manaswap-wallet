@@ -94,7 +94,7 @@ class ManaswapEvmProvider extends EventTarget {
       if (event.source !== window) return;
       if (event.data?.source !== 'manaswap-evm-content') return;
 
-      const { type, requestId, result, error, event: eventType, data } = event.data;
+      const { type, requestId, error, event: eventType, data } = event.data;
 
       // Handle responses to requests
       if (type === 'response' && requestId !== undefined) {
@@ -102,9 +102,11 @@ class ManaswapEvmProvider extends EventTarget {
         if (pending) {
           this._pendingRequests.delete(requestId);
           if (error) {
-            pending.reject(this._createError(error.code, error.message));
+            pending.reject(this._createError(error.code || -32603, error.message || 'Unknown error'));
           } else {
-            pending.resolve(result);
+            // Resolve with the full response object (contains success, data, accounts, etc.)
+            const { source: _s, type: _t, requestId: _r, ...responseData } = event.data;
+            pending.resolve(responseData);
           }
         }
       }
@@ -316,8 +318,12 @@ class ManaswapEvmProvider extends EventTarget {
   private async _requestAccounts(): Promise<string[]> {
     const response = await this._sendToBackground('manaswap:evmRequestAccounts', {});
     if (response?.success) {
-      this._accounts = response.accounts || [];
+      // Handle both { accounts: [...] } and { data: { accounts: [...] } } formats
+      const accounts = response.data?.accounts || response.accounts || [];
+      this._accounts = accounts;
       this._connected = true;
+      this._emitEvent('connect', { chainId: this._chainId });
+      this._emitEvent('accountsChanged', this._accounts);
       return this._accounts;
     }
     throw this._createError(RPC_ERRORS.USER_REJECTED.code, response?.error || 'User rejected connection');
@@ -353,7 +359,8 @@ class ManaswapEvmProvider extends EventTarget {
     const [message, address] = params;
     const response = await this._sendToBackground('manaswap:evmPersonalSign', { message, address });
     if (response?.success) {
-      return response.signature;
+      // Handle both { signature: '...' } and { data: { signature: '...' } } formats
+      return response.data?.signature || response.signature;
     }
     throw this._createError(RPC_ERRORS.USER_REJECTED.code, response?.error || 'User rejected signing');
   }
@@ -362,7 +369,8 @@ class ManaswapEvmProvider extends EventTarget {
     const [address, message] = params;
     const response = await this._sendToBackground('manaswap:evmSign', { address, message });
     if (response?.success) {
-      return response.signature;
+      // Handle both { signature: '...' } and { data: { signature: '...' } } formats
+      return response.data?.signature || response.signature;
     }
     throw this._createError(RPC_ERRORS.USER_REJECTED.code, response?.error || 'User rejected signing');
   }
@@ -375,7 +383,8 @@ class ManaswapEvmProvider extends EventTarget {
       version: method.includes('v4') ? 'v4' : method.includes('v3') ? 'v3' : 'v1'
     });
     if (response?.success) {
-      return response.signature;
+      // Handle both { signature: '...' } and { data: { signature: '...' } } formats
+      return response.data?.signature || response.signature;
     }
     throw this._createError(RPC_ERRORS.USER_REJECTED.code, response?.error || 'User rejected signing');
   }
@@ -384,7 +393,9 @@ class ManaswapEvmProvider extends EventTarget {
     const tx = params[0];
     const response = await this._sendToBackground('manaswap:evmSendTransaction', { transaction: tx });
     if (response?.success) {
-      return response.hash;
+      // Handle both { hash: '...' } and { data: { hash: '...' } } formats
+      const hash = response.data?.hash || response.hash;
+      return hash;
     }
     throw this._createError(RPC_ERRORS.USER_REJECTED.code, response?.error || 'User rejected transaction');
   }
@@ -393,7 +404,8 @@ class ManaswapEvmProvider extends EventTarget {
     const tx = params[0];
     const response = await this._sendToBackground('manaswap:evmSignTransaction', { transaction: tx });
     if (response?.success) {
-      return response.signedTransaction;
+      // Handle both direct and { data: {...} } formats
+      return response.data?.signedTransaction || response.signedTransaction;
     }
     throw this._createError(RPC_ERRORS.USER_REJECTED.code, response?.error || 'User rejected transaction');
   }
