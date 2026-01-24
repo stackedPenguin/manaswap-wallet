@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Icons, Skeleton } from '../../shared/ui';
 import { getSwapQuote, getSwapTransaction, getTradableTokens, type QuoteResponse } from '../../shared/swap';
+import { getEvmSwapQuote, getEvmSwapTokens, getEvmChainId, type EvmQuoteResponse } from '../../shared/evm-swap';
+import { isEvmNetworkId } from '../../shared/evm-networks';
 import type { UnifiedTokenBalance } from './MainWallet';
 import { sendMessage } from '../../shared/messaging';
 import { getChainId } from '../../shared/networks';
@@ -8,24 +10,34 @@ import { getChainId } from '../../shared/networks';
 interface SwapPageProps {
     userTokens: UnifiedTokenBalance[];
     userAddress: string;
+    evmAddress?: string | null;
     onSuccess: () => void;
     currentNetworkId: string;
     onBack: () => void;
 }
 
-export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId, onBack }: SwapPageProps) {
-    // Determine default tokens
-    const chainId = getChainId(currentNetworkId);
-    const nativeSymbol = chainId === 195 ? 'XNT' : 'SOL';
-    const usdcSymbol = chainId === 195 ? 'USDC.X' : 'USDC';
+export function SwapPage({ userTokens, userAddress, evmAddress, onSuccess, currentNetworkId, onBack }: SwapPageProps) {
+    // Detect if this is an EVM network
+    const isEvm = isEvmNetworkId(currentNetworkId);
+
+    // Determine default tokens based on network type
+    const chainId = isEvm ? getEvmChainId(currentNetworkId) : getChainId(currentNetworkId);
+    const nativeSymbol = isEvm ? 'ETH' : (chainId === 195 ? 'XNT' : 'SOL');
+    const usdcSymbol = isEvm ? 'USDC' : (chainId === 195 ? 'USDC.X' : 'USDC');
 
     const [fromToken, setFromToken] = useState<UnifiedTokenBalance | any | null>(null);
     const [toToken, setToToken] = useState<UnifiedTokenBalance | any | null>(null);
     const [amount, setAmount] = useState('');
     const [quote, setQuote] = useState<QuoteResponse | null>(null);
+    const [evmQuote, setEvmQuote] = useState<EvmQuoteResponse | null>(null);
     const [isLoadingQuote, setIsLoadingQuote] = useState(false);
     const [isSwapping, setIsSwapping] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // EVM Approval State
+    const [needsApproval, setNeedsApproval] = useState(false);
+    const [approvalAddress, setApprovalAddress] = useState<string>('');
+    const [isApproving, setIsApproving] = useState(false);
 
     // Token List State
     const [tradableTokens, setTradableTokens] = useState<UnifiedTokenBalance[]>([]);
@@ -39,15 +51,29 @@ export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId,
     useEffect(() => {
         const loadTokens = async () => {
             try {
-                // Fetch market tokens (from pools/API)
-                const marketTokens = await getTradableTokens(currentNetworkId);
-                setTradableTokens(marketTokens as UnifiedTokenBalance[]);
+                if (isEvm) {
+                    // Fetch EVM tokens from LI.FI
+                    const evmTokens = await getEvmSwapTokens(chainId);
+                    const mapped = evmTokens.map(t => ({
+                        mint: t.address,
+                        symbol: t.symbol,
+                        name: t.name,
+                        decimals: t.decimals,
+                        logoURI: t.logoURI,
+                        amount: '0',
+                    }));
+                    setTradableTokens(mapped as UnifiedTokenBalance[]);
+                } else {
+                    // Fetch Solana/X1 market tokens (from pools/API)
+                    const marketTokens = await getTradableTokens(currentNetworkId);
+                    setTradableTokens(marketTokens as UnifiedTokenBalance[]);
+                }
             } catch (e) {
                 console.error('Failed to load tradable tokens', e);
             }
         };
         loadTokens();
-    }, [currentNetworkId]);
+    }, [currentNetworkId, isEvm, chainId]);
 
     // Initialize defaults once tokens are loaded
     useEffect(() => {
@@ -93,6 +119,8 @@ export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId,
         const fetchQuote = async () => {
             if (!fromToken || !toToken || !amount || Number(amount) <= 0) {
                 setQuote(null);
+                setEvmQuote(null);
+                setNeedsApproval(false);
                 setError(null);
                 return;
             }
@@ -101,6 +129,7 @@ export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId,
             if (fromToken.mint === toToken.mint) {
                 setError("Cannot swap same token");
                 setQuote(null);
+                setEvmQuote(null);
                 return;
             }
 
@@ -109,18 +138,39 @@ export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId,
 
             try {
                 const atomicAmount = Math.floor(Number(amount) * Math.pow(10, fromToken.decimals));
-                const q = await getSwapQuote(currentNetworkId, fromToken.mint, toToken.mint, atomicAmount, 50, userAddress);
-                setQuote(q);
+
+                if (isEvm && evmAddress) {
+                    // EVM swap via LI.FI
+                    const eq = await getEvmSwapQuote({
+                        fromChain: chainId,
+                        toChain: chainId,
+                        fromToken: fromToken.mint,
+                        toToken: toToken.mint,
+                        fromAmount: atomicAmount.toString(),
+                        fromAddress: evmAddress,
+                    });
+                    setEvmQuote(eq);
+                    setNeedsApproval(eq.needsApproval);
+                    setApprovalAddress(eq.approvalAddress);
+                    setQuote(null);
+                } else {
+                    // Solana/X1 swap
+                    const q = await getSwapQuote(currentNetworkId, fromToken.mint, toToken.mint, atomicAmount, 50, userAddress);
+                    setQuote(q);
+                    setEvmQuote(null);
+                    setNeedsApproval(false);
+                }
             } catch (err: any) {
                 console.error('Quote error:', err);
                 const msg = err.message || 'Failed to get quote';
                 // Detect Liquidity Error
-                if (msg.includes('Insufficient liquidity') || msg.includes('No pool found')) {
+                if (msg.includes('Insufficient liquidity') || msg.includes('No pool found') || msg.includes('No routes found')) {
                     setError('Insufficient liquidity for this pair');
                 } else {
                     setError(msg);
                 }
                 setQuote(null);
+                setEvmQuote(null);
             } finally {
                 setIsLoadingQuote(false);
             }
@@ -128,9 +178,70 @@ export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId,
 
         const timeout = setTimeout(fetchQuote, 500); // 500ms debounce
         return () => clearTimeout(timeout);
-    }, [fromToken, toToken, amount, currentNetworkId]);
+    }, [fromToken, toToken, amount, currentNetworkId, isEvm, evmAddress, chainId]);
+
+    // Handle EVM token approval
+    const handleApprove = async () => {
+        if (!evmQuote || !evmAddress || !fromToken) return;
+
+        setIsApproving(true);
+        setError(null);
+
+        try {
+            const res = await sendMessage<{ success: boolean; hash?: string; error?: string }>({
+                type: 'manaswap:executeEvmApproval',
+                payload: {
+                    tokenAddress: fromToken.mint,
+                    spenderAddress: approvalAddress,
+                    networkId: currentNetworkId,
+                    accountAddress: evmAddress,
+                }
+            });
+
+            if (res.success) {
+                setNeedsApproval(false);
+            } else {
+                throw new Error(res.error || 'Approval failed');
+            }
+        } catch (err: any) {
+            console.error('Approval error:', err);
+            setError(err.message || 'Approval failed');
+        } finally {
+            setIsApproving(false);
+        }
+    };
 
     const handleSwap = async () => {
+        // EVM swap
+        if (isEvm && evmQuote && evmAddress) {
+            setIsSwapping(true);
+            setError(null);
+
+            try {
+                const res = await sendMessage<{ success: boolean; hash?: string; error?: string }>({
+                    type: 'manaswap:executeEvmSwap',
+                    payload: {
+                        transactionRequest: evmQuote.transactionRequest,
+                        networkId: currentNetworkId,
+                        accountAddress: evmAddress,
+                    }
+                });
+
+                if (res.success) {
+                    onSuccess();
+                } else {
+                    throw new Error(res.error || 'Swap failed');
+                }
+            } catch (err: any) {
+                console.error('EVM swap error:', err);
+                setError(err.message || 'Swap failed');
+            } finally {
+                setIsSwapping(false);
+            }
+            return;
+        }
+
+        // Solana/X1 swap
         if (!quote || !userAddress) return;
 
         setIsSwapping(true);
@@ -254,7 +365,9 @@ export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId,
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{ flex: 1, fontSize: '1.5rem', fontWeight: 'bold', color: isLoadingQuote ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
-                            {isLoadingQuote ? <Skeleton width={100} height={24} /> : quote ? (Number(quote.outAmount) / Math.pow(10, toToken?.decimals || 6)).toFixed(6) : '0.00'}
+                            {isLoadingQuote ? <Skeleton width={100} height={24} /> :
+                              evmQuote ? (Number(evmQuote.toAmount) / Math.pow(10, toToken?.decimals || 18)).toFixed(6) :
+                              quote ? (Number(quote.outAmount) / Math.pow(10, toToken?.decimals || 6)).toFixed(6) : '0.00'}
                         </div>
                         <button
                             onClick={() => setShowToSelector(true)}
@@ -275,8 +388,30 @@ export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId,
                     </div>
                 </div>
 
-                {/* Quote Info */}
-                {quote && (
+                {/* Quote Info - EVM */}
+                {evmQuote && (
+                    <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', fontSize: '0.85rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Rate</span>
+                            <span>1 {fromToken?.symbol} ≈ {(Number(evmQuote.toAmount) / Math.pow(10, toToken?.decimals || 18) / (Number(amount))).toFixed(4)} {toToken?.symbol}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Price Impact</span>
+                            <span style={{ color: Number(evmQuote.priceImpact) > 1 ? 'red' : 'var(--accent-color)' }}>{Number(evmQuote.priceImpact).toFixed(2)}%</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Gas Cost</span>
+                            <span>${Number(evmQuote.gasCostUSD).toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Route</span>
+                            <span>{evmQuote.route.join(' → ') || 'LI.FI'}</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Quote Info - Solana/X1 */}
+                {quote && !evmQuote && (
                     <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', fontSize: '0.85rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                             <span style={{ color: 'var(--text-secondary)' }}>Rate</span>
@@ -317,14 +452,41 @@ export function SwapPage({ userTokens, userAddress, onSuccess, currentNetworkId,
                     </div>
                 )}
 
-                <button
-                    className="btn-primary"
-                    style={{ width: '100%', marginTop: 'auto', padding: '16px', fontSize: '1rem', opacity: (error || !quote) ? 0.5 : 1, cursor: (error || !quote) ? 'not-allowed' : 'pointer' }}
-                    disabled={!quote || isSwapping || isLoadingQuote || !!error}
-                    onClick={handleSwap}
-                >
-                    {isSwapping ? 'Swapping...' : isLoadingQuote ? 'Getting Quote...' : error ? 'Swap Unavailable' : 'Swap'}
-                </button>
+                {/* EVM: Approval Button (shown when approval needed) */}
+                {isEvm && evmQuote && needsApproval && (
+                    <button
+                        className="btn-primary"
+                        style={{ width: '100%', marginTop: 'auto', padding: '16px', fontSize: '1rem', opacity: isApproving ? 0.7 : 1 }}
+                        disabled={isApproving || isLoadingQuote}
+                        onClick={handleApprove}
+                    >
+                        {isApproving ? 'Approving...' : `Approve ${fromToken?.symbol}`}
+                    </button>
+                )}
+
+                {/* EVM: Swap Button (shown after approval or for native tokens) */}
+                {isEvm && evmQuote && !needsApproval && (
+                    <button
+                        className="btn-primary"
+                        style={{ width: '100%', marginTop: 'auto', padding: '16px', fontSize: '1rem', opacity: (error || isSwapping) ? 0.7 : 1 }}
+                        disabled={isSwapping || isLoadingQuote || !!error}
+                        onClick={handleSwap}
+                    >
+                        {isSwapping ? 'Swapping...' : 'Swap'}
+                    </button>
+                )}
+
+                {/* Solana/X1: Swap Button */}
+                {!isEvm && (
+                    <button
+                        className="btn-primary"
+                        style={{ width: '100%', marginTop: 'auto', padding: '16px', fontSize: '1rem', opacity: (error || !quote) ? 0.5 : 1, cursor: (error || !quote) ? 'not-allowed' : 'pointer' }}
+                        disabled={!quote || isSwapping || isLoadingQuote || !!error}
+                        onClick={handleSwap}
+                    >
+                        {isSwapping ? 'Swapping...' : isLoadingQuote ? 'Getting Quote...' : error ? 'Swap Unavailable' : 'Swap'}
+                    </button>
+                )}
 
 
                 {/* Token Selector Modal (Full Screen Overlay) */}

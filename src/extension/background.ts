@@ -33,6 +33,7 @@ import {
 } from './vault';
 import { getEvmNetworkByChainId } from '../shared/evm-networks';
 import { getEvmProvider } from '../shared/evm-balances';
+import { Contract } from 'ethers';
 import { Connection, VersionedTransaction, Transaction, Keypair } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 import { getLedgerAccounts } from './ledger';
@@ -870,6 +871,69 @@ chrome.runtime.onMessage.addListener((message: ManaswapMessage, _sender, sendRes
           sendResponse({ success: true, signature });
         } catch (e: any) {
           console.error('[Background] Swap execution failed:', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:executeEvmSwap': {
+        try {
+          const { transactionRequest, networkId, accountAddress } = message.payload;
+
+          // Get EVM wallet
+          const wallet = getEvmWalletByEvmAddress(accountAddress);
+          if (!wallet) {
+            throw new Error('EVM wallet not found for address: ' + accountAddress);
+          }
+
+          // Get provider and connect wallet
+          const provider = getEvmProvider(networkId);
+          const connectedWallet = wallet.connect(provider);
+
+          // Execute swap transaction
+          const tx = await connectedWallet.sendTransaction({
+            to: transactionRequest.to,
+            data: transactionRequest.data,
+            value: BigInt(transactionRequest.value || '0'),
+            gasLimit: transactionRequest.gasLimit ? BigInt(transactionRequest.gasLimit) : undefined,
+          });
+
+          console.log('[Background] EVM swap executed:', tx.hash);
+          sendResponse({ success: true, hash: tx.hash });
+        } catch (e: any) {
+          console.error('[Background] EVM swap execution failed:', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        break;
+      }
+      case 'manaswap:executeEvmApproval': {
+        try {
+          const { tokenAddress, spenderAddress, networkId, accountAddress } = message.payload;
+
+          // Get EVM wallet
+          const wallet = getEvmWalletByEvmAddress(accountAddress);
+          if (!wallet) {
+            throw new Error('EVM wallet not found for address: ' + accountAddress);
+          }
+
+          // Get provider and connect wallet
+          const provider = getEvmProvider(networkId);
+          const connectedWallet = wallet.connect(provider);
+
+          // Create contract instance and approve
+          const ERC20_ABI = ['function approve(address spender, uint256 amount) returns (bool)'];
+          const contract = new Contract(tokenAddress, ERC20_ABI, connectedWallet);
+
+          // Approve max uint256
+          const maxUint256 = BigInt(2) ** BigInt(256) - BigInt(1);
+          const tx = await contract.approve(spenderAddress, maxUint256);
+
+          // Wait for confirmation
+          await tx.wait();
+
+          console.log('[Background] EVM approval executed:', tx.hash);
+          sendResponse({ success: true, hash: tx.hash });
+        } catch (e: any) {
+          console.error('[Background] EVM approval failed:', e);
           sendResponse({ success: false, error: e.message });
         }
         break;

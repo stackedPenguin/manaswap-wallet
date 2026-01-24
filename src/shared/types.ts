@@ -120,7 +120,12 @@ export type PendingRequest =
   // Ledger hardware wallet requests - handled by popup doing WebHID signing
   | (PendingRequestBase & { type: 'ledger-sign-transaction'; payload: number[]; derivationPath: string })
   | (PendingRequestBase & { type: 'ledger-sign-message'; payload: number[]; derivationPath: string })
-  | (PendingRequestBase & { type: 'ledger-sign-and-send'; payload: number[]; derivationPath: string; options?: { skipPreflight?: boolean } });
+  | (PendingRequestBase & { type: 'ledger-sign-and-send'; payload: number[]; derivationPath: string; options?: { skipPreflight?: boolean } })
+  // EVM requests - handled by popup showing EvmApprovalModal
+  | (PendingRequestBase & { type: 'evm-connect'; payload?: undefined; evmAddress: string })
+  | (PendingRequestBase & { type: 'evm-sign'; payload: { message: string }; evmAddress: string })
+  | (PendingRequestBase & { type: 'evm-sign-typed-data'; payload: { data: string }; evmAddress: string })
+  | (PendingRequestBase & { type: 'evm-transaction'; payload: { to?: string; value?: string; data?: string; gas?: string; chainId?: string }; evmAddress: string; network: string });
 
 // Re-export NetworkHealth for convenience
 export type { NetworkHealth } from './networks';
@@ -199,6 +204,8 @@ export type ManaswapMessage =
   | { type: 'manaswap:getTokenPrices'; payload: { mints: string[] } }
   | { type: 'manaswap:getTransactionHistory'; payload: { address: string; networkId: NetworkClusterId; limit?: number } }
   | { type: 'manaswap:executeSwap'; payload: { swapTransactionBase64: string } }
+  | { type: 'manaswap:executeEvmSwap'; payload: { transactionRequest: { to: string; data: string; value: string; gasLimit?: string }; networkId: string; accountAddress: string } }
+  | { type: 'manaswap:executeEvmApproval'; payload: { tokenAddress: string; spenderAddress: string; networkId: string; accountAddress: string } }
   | { type: 'manaswap:getPortfolioHistory'; payload: { address: string; networkId: NetworkClusterId } }
   // Ledger Messages
   | { type: 'manaswap:ledgerSignResult'; payload: { requestId: string; signature: number[] } }

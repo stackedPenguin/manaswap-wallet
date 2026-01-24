@@ -47,3 +47,4 @@ export function getEnvVar(key: string, fallback: string = ''): string {
 export const getSolanaRpcUrl = () => getEnvVar('VITE_SOLANA_RPC_URL', 'https://rpc.ankr.com/solana');
 export const getHeliusApiKey = () => getEnvVar('VITE_HELIUS_API_KEY', '');
 export const getJupiterApiKey = () => getEnvVar('VITE_JUPITER_ULTRA_API_KEY', '');
+export const getTheGraphApiKey = () => getEnvVar('VITE_THEGRAPH_API_KEY', '');

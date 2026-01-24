@@ -1802,6 +1802,7 @@ export function MainWallet() {
       <SwapPage
         userTokens={unifiedAssets.filter(a => a.type === 'token').map(a => a.token!)}
         userAddress={selectedAccount.address}
+        evmAddress={evmAddress}
         currentNetworkId={selectedNetwork.id}
         onSuccess={() => {
           setView('home');
