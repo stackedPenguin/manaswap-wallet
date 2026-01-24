@@ -1,0 +1,1 @@
+Before doing a build for the chrome extension, always increment the build number appropriately and then zip the build after its doen.
